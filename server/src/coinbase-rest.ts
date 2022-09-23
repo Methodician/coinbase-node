@@ -1,24 +1,24 @@
-const http = require("http");
-require("dotenv").config();
+const http = require('http');
+require('dotenv').config();
 
-import crypto from "crypto";
-import axios, { AxiosInstance } from "axios";
+import crypto from 'crypto';
+import axios, { AxiosInstance } from 'axios';
 
-const hostname = "127.0.0.1";
+const hostname = '127.0.0.1';
 const port = 3000;
 
 const server = http.createServer((req: any, res: any) => {
   res.statusCode = 200;
   // res.setHeader("Content-Type", "text/plain");
-  res.setHeader("Content-Type", "application/json");
+  res.setHeader('Content-Type', 'application/json');
   // res.end("Hello World");
   // web3Js().then((data) => {
   //   res.end(data);
   // });
 
-  testCommerceAuth().then((data) => {
-    res.end(JSON.stringify(data, null, 2));
-  });
+  // testCommerceAuth().then((data) => {
+  //   res.end(JSON.stringify(data, null, 2));
+  // // });
   // testExchangeAuth().then((data) => {
   //   res.end(JSON.stringify(data, null, 2));
   // });
@@ -56,21 +56,21 @@ server.listen(port, hostname, () => {
 
 const logError = (error: any) => {
   if (!error.code && !error.response.data) {
-    console.error("Request Error: ", error);
+    console.error('Request Error: ', error);
   }
-  console.error("Request Error: ", error.code, error.response.data);
+  console.error('Request Error: ', error.code, error.response.data);
 };
 
 const testCommerceAuth = async () => {
   const { key, version } = commerceEnvForSure();
 
   const options = {
-    method: "GET",
-    url: "https://api.commerce.coinbase.com/charges",
+    method: 'GET',
+    url: 'https://api.commerce.coinbase.com/charges',
     headers: {
-      accept: "application/json",
-      "X-CC-Api-Key": key,
-      "X-CC-Version": version,
+      accept: 'application/json',
+      'X-CC-Api-Key': key,
+      'X-CC-Version': version,
     },
   };
 
@@ -109,9 +109,9 @@ const getProductCandles = async (args: GetProductCandlesArgs) => {
   console.log(url);
 
   const options = {
-    method: "GET",
+    method: 'GET',
     url,
-    headers: { accept: "application/json" },
+    headers: { accept: 'application/json' },
   };
 
   // return options;
@@ -125,48 +125,48 @@ const getProductCandles = async (args: GetProductCandlesArgs) => {
 };
 
 const getProductBook = async (id: string) => {
-  console.log("getting product book");
+  console.log('getting product book');
   const options = {
-    method: "GET",
+    method: 'GET',
     url: `https://api.exchange.coinbase.com/products/${id}/book?level=2`,
-    headers: { accept: "application/json" },
+    headers: { accept: 'application/json' },
   };
 
   try {
     const res = await axios.request(options);
     return res.data;
   } catch (error) {
-    console.error("Request Error: ", error);
+    console.error('Request Error: ', error);
   }
 };
 
 const getSingleProduct = async (id: string) => {
   const options = {
-    method: "GET",
+    method: 'GET',
     url: `https://api.exchange.coinbase.com/products/${id}`,
-    headers: { accept: "application/json" },
+    headers: { accept: 'application/json' },
   };
 
   try {
     const res = await axios.request(options);
     return res.data;
   } catch (error) {
-    console.error("Request Error: ", error);
+    console.error('Request Error: ', error);
   }
 };
 
 const getAllTradingPairs = async () => {
   const options = {
-    method: "GET",
-    url: "https://api.exchange.coinbase.com/products",
-    headers: { accept: "application/json" },
+    method: 'GET',
+    url: 'https://api.exchange.coinbase.com/products',
+    headers: { accept: 'application/json' },
   };
 
   try {
     const res = await axios.request(options);
     return res.data;
   } catch (error) {
-    console.error("Request Error: ", error);
+    console.error('Request Error: ', error);
   }
 
   axios
@@ -181,31 +181,31 @@ const getAllTradingPairs = async () => {
 
 const getCurrencyById = async (id: string) => {
   const options = {
-    method: "GET",
+    method: 'GET',
     url: `https://api.exchange.coinbase.com/currencies/${id}`,
-    headers: { accept: "application/json" },
+    headers: { accept: 'application/json' },
   };
 
   try {
     const res = await axios.request(options);
     return res.data;
   } catch (error) {
-    console.error("Request Error: ", error);
+    console.error('Request Error: ', error);
   }
 };
 
 const getAllCurrencies = async () => {
   const options = {
-    method: "GET",
-    url: "https://api.exchange.coinbase.com/currencies",
-    headers: { accept: "application/json" },
+    method: 'GET',
+    url: 'https://api.exchange.coinbase.com/currencies',
+    headers: { accept: 'application/json' },
   };
 
   try {
     const res = await axios.request(options);
     return res.data;
   } catch (error) {
-    console.error("Request Error: ", error);
+    console.error('Request Error: ', error);
   }
 };
 
@@ -216,17 +216,17 @@ const testExchangeAuth = async () => {
 
   const { key, secret, passphrase } = exchangeEnvForSure();
 
-  const signature = await createExchangeSignature(secret, "/accounts", epoch);
+  const signature = await createExchangeSignature(secret, '/accounts', epoch);
 
   const options = {
-    method: "GET",
-    url: "https://api.exchange.coinbase.com/accounts",
+    method: 'GET',
+    url: 'https://api.exchange.coinbase.com/accounts',
     headers: {
-      accept: "application/json",
-      "CB-ACCESS-KEY": key,
-      "CB-ACCESS-SIGN": signature,
-      "CB-ACCESS-PASSPHRASE": passphrase,
-      "CB-ACCESS-TIMESTAMP": epoch,
+      accept: 'application/json',
+      'CB-ACCESS-KEY': key,
+      'CB-ACCESS-SIGN': signature,
+      'CB-ACCESS-PASSPHRASE': passphrase,
+      'CB-ACCESS-TIMESTAMP': epoch,
     },
   };
 
@@ -234,7 +234,7 @@ const testExchangeAuth = async () => {
     const res = await axios.request(options);
     return res.data;
   } catch (error) {
-    console.error("Request Error: ", error);
+    console.error('Request Error: ', error);
   }
 };
 
@@ -246,7 +246,7 @@ const exchangeEnvForSure = () => {
     EXCHANGE_PASSPHRASE: passphrase,
   } = process.env;
   if (!key || !secret || !passphrase) {
-    throw new Error("Missing exchange environment variables");
+    throw new Error('Missing exchange environment variables');
   }
 
   return {
@@ -259,7 +259,7 @@ const exchangeEnvForSure = () => {
 const commerceEnvForSure = () => {
   const { COMMERCE_KEY: key, COMMERCE_VERSION: version } = process.env;
   if (!key || !version) {
-    throw new Error("Missing commerce environment variables");
+    throw new Error('Missing commerce environment variables');
   }
 
   return {
@@ -269,18 +269,18 @@ const commerceEnvForSure = () => {
 };
 
 const getCoinbaseTime = async () => {
-  console.log("getCoinbaseTime");
+  console.log('getCoinbaseTime');
 
   const options = {
-    method: "GET",
-    url: "https://api.coinbase.com/v2/time",
+    method: 'GET',
+    url: 'https://api.coinbase.com/v2/time',
   };
 
   try {
     const res = await axios.request(options);
     return res.data;
   } catch (error) {
-    console.error("Request Error: ", error);
+    console.error('Request Error: ', error);
   }
 };
 
@@ -289,10 +289,10 @@ const createExchangeSignature = async (
   path: string,
   timestamp: number
 ) => {
-  const sigString = timestamp + "GET" + path;
-  const key = Buffer.from(secret, "base64");
-  const hmac = crypto.createHmac("sha256", key);
-  const signature = hmac.update(sigString).digest("base64");
+  const sigString = timestamp + 'GET' + path;
+  const key = Buffer.from(secret, 'base64');
+  const hmac = crypto.createHmac('sha256', key);
+  const signature = hmac.update(sigString).digest('base64');
 
   return signature;
 };
