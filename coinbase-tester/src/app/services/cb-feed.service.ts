@@ -1,11 +1,44 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, filter, Subject } from 'rxjs';
+import { BehaviorSubject, filter, map, Subject } from 'rxjs';
 import { BollingerBands, NotEnoughDataError, SMA } from 'trading-signals';
 import axios from 'axios';
 const FEED_URL = 'wss://ws-feed.exchange.coinbase.com';
 const EXCHANGE_URL = 'https://api.exchange.coinbase.com';
 const socket = new WebSocket(FEED_URL);
 
+const STARTER_CANDLE = {
+  high: 0,
+  low: 0,
+  open: 0,
+  close: 0,
+  volume: 0,
+  timestamp: 0,
+  date: new Date(),
+  timeSinceLastCandle: 0,
+  minute: 0,
+};
+
+// Should be subset/union with a type for all messages
+type MatchMessage = {
+  maker_order_id: string; // "a5061d9b-b977-41a1-9d05-a862437a78ae"
+  //either pre-process or make a post-process type where this is number/Big
+  price: string; // "1319.3"
+  // Should be string literal type e.g. "ETH-USD" | "BTC-USD"
+  product_id: string; // "ETH-USD"
+  sequence: number; // 36833737703
+  // String literal e.g. "buy" | "sell"
+  side: string; // "sell"
+  // Post-processed type could be number/Big
+  size: string; // "0.16793782"
+  taker_order_id: string; // "0e0a4b73-aa4f-4274-97e4-7d49bf3f1c3c"
+  // Post-processed type likely Date or number
+  time: string; // "2022-10-01T16:18:18.157446Z"
+  trade_id: number; // 363415764
+  // String literal e.g. "match" | "done" | "open" | "received"
+  type: string; // "match"
+};
+
+// Some of these number types could be Big numbers
 type Candle = {
   high: number;
   low: number;
@@ -13,30 +46,45 @@ type Candle = {
   close: number;
   volume: number;
   timestamp: number;
+  date: Date;
+  minute: number;
+  timeSinceLastCandle: number; // For testing only (I think, since it is theoretically inferrable)
 };
 
 @Injectable({
   providedIn: 'root',
 })
 export class CbFeedService {
+  // I suspect a reliable strategy would be to always place buy and sell orders but distance and scale them based on the signals
+  // My buys move closer and/or higher or further and/or lower and sells do the opposite based on signals
+  // Although, there may be viable exceptions where the scale should move away from the price...
   private isSocketOpen$ = new BehaviorSubject(false);
   private lastSocketError$ = new Subject<any>();
   lastMessage$ = new Subject<any>();
+  lastMatch$ = this.lastMessage$.pipe(
+    filter((msg) => msg.type === 'match')
+  ) as Subject<MatchMessage>;
+  processedMatches$ = this.lastMatch$.pipe(
+    map(({ price, product_id, size, time }) => ({
+      price: Number(price),
+      productId: product_id,
+      size: Number(size),
+      date: new Date(time),
+    }))
+  );
+
   allTypes: Record<string, boolean> = {};
 
-  snapshots: any[] = [];
-  sma: SMA = new SMA(30);
-  bollingerBands: BollingerBands = new BollingerBands(30, 2);
+  // bollingerBands: BollingerBands = new BollingerBands(30, 2);
 
   currentMinute?: number;
-  currentCandle: Candle = {
-    high: 0,
-    low: 0,
-    open: 0,
-    close: 0,
-    volume: 0,
-    timestamp: 0,
-  };
+  // May actually need to rebuild last/current candle from another REST call to get matches if I want to reconcile the immediate one
+  // Also maybe best to just get matches and build all candles locally
+  currentCandle: Candle = STARTER_CANDLE;
+  lastCandle: Candle = STARTER_CANDLE;
+
+  // NOTE: I think I need to delay the call to REST so I can ensure my current candle is always aligned with the last one from REST
+  // Possibly even do a check and restart the process if the last candle from REST is not the timing is off
   // Should be able to derive other candle intervals from this
   // todo: store in db (possibly in chunks or nested by day/hour/minute)
   // Could probably just grab candles from REST API instead of storing them
@@ -64,71 +112,86 @@ export class CbFeedService {
       this.lastSocketError$.next(error);
     };
 
-    this.filled$.subscribe((msg) => this.updateSMA(msg.price));
-
     this.start();
-    this.processMatches();
+    this.watchMatches();
   }
 
-  processMatches = () => {
-    this.lastMessage$
-      .pipe(filter((msg) => msg.type === 'match'))
-      .subscribe((match) => {
-        let { price, time } = match;
-        price = parseFloat(price);
-        time = new Date(time);
-        let timestamp = Math.round(time.getTime() / 60000) * 60000;
-        const minute = time.getMinutes();
-        if (this.currentMinute === undefined || this.currentMinute !== minute) {
-          if (this.currentCandle.timestamp !== 0) {
-            this.updateSMA(this.currentCandle.close);
-            this.pastCandles.push(this.currentCandle);
-          }
-          this.currentMinute = minute;
-          this.currentCandle = {
-            high: price,
-            low: price,
-            open: price,
-            close: price,
-            volume: 0,
-            timestamp,
-          };
-        } else {
-          this.currentCandle.high = Math.max(this.currentCandle.high, price);
-          this.currentCandle.low = Math.min(this.currentCandle.low, price);
-          this.currentCandle.close = price;
-        }
-        this.currentCandle.volume += parseFloat(match.size);
-      });
-  };
-
-  updateSMA = (price?: number) => {
-    if (price) {
-      this.sma.update(price);
-    }
-  };
-
-  setSMA = (period: number) => {
-    this.sma = new SMA(period);
-  };
-
-  getSMA = () => {
-    try {
-      const res = this.sma.getResult();
-      return res;
-    } catch (error: any) {
-      if (error.constructor.name !== 'NotEnoughDataError') {
-        console.log(error);
+  watchMatches = () => {
+    // pipe takeUntil unsubscribe
+    // Should also account for multiple productIds
+    this.processedMatches$.subscribe(({ price, size, date }) => {
+      const timestamp = date.getTime();
+      const minute = date.getMinutes();
+      const restartCurrentCandle = () => {
+        this.currentCandle = {
+          timeSinceLastCandle: timestamp - this.lastCandle.timestamp,
+          timestamp,
+          date,
+          minute,
+          high: price,
+          low: price,
+          open: price,
+          close: price,
+          volume: size,
+        };
+      };
+      const updateCurrentMinute = () => {
+        this.currentMinute = minute;
+      };
+      const updateCurrentCandle = () => {
+        this.currentCandle = {
+          ...this.currentCandle,
+          high: Math.max(this.currentCandle.high, price),
+          low: Math.min(this.currentCandle.low, price),
+          close: price,
+          volume: this.currentCandle.volume + size,
+          timeSinceLastCandle: timestamp - this.lastCandle.timestamp,
+        };
+      };
+      const iterateCandleTrackers = () => {
+        this.lastCandle = this.currentCandle;
+        this.pastCandles.push(this.currentCandle);
+      };
+      if (this.currentMinute === undefined) {
+        updateCurrentMinute();
+        restartCurrentCandle();
+      } else if (this.currentMinute !== minute) {
+        iterateCandleTrackers();
+        restartCurrentCandle();
+        updateCurrentMinute();
+      } else {
+        updateCurrentCandle();
       }
-      return null;
-    }
+    });
   };
 
-  updateBollingerBands = (price?: number) => {
-    if (price) {
-      this.bollingerBands.update(price);
-    }
-  };
+  // updateSMA = (price?: number) => {
+  //   if (price) {
+  //     this.sma.update(price);
+  //   }
+  // };
+
+  // setSMA = (period: number) => {
+  //   this.sma = new SMA(period);
+  // };
+
+  // getSMA = () => {
+  //   try {
+  //     const res = this.sma.getResult();
+  //     return res;
+  //   } catch (error: any) {
+  //     if (error.constructor.name !== 'NotEnoughDataError') {
+  //       console.log(error);
+  //     }
+  //     return null;
+  //   }
+  // };
+
+  // updateBollingerBands = (price?: number) => {
+  //   if (price) {
+  //     this.bollingerBands.update(price);
+  //   }
+  // };
 
   onSocketMessage = (event: MessageEvent) => {
     const res = JSON.parse(event.data),
@@ -136,10 +199,6 @@ export class CbFeedService {
 
     this.lastMessage$.next(res);
     this.allTypes[type] = true;
-
-    if (type === 'snapshot') {
-      this.snapshots.push(res);
-    }
   };
 
   start = () => {
@@ -160,31 +219,57 @@ export class CbFeedService {
       }
     });
 
-    this.getProductCandles({ id: 'ETH-USD', granularity: 60 }).then(
-      (res: any) => {
-        const candles: Candle[] = res.map((data: any) => ({
-          high: parseFloat(data[2]),
-          low: parseFloat(data[1]),
-          open: parseFloat(data[3]),
-          close: parseFloat(data[4]),
-          volume: parseFloat(data[5]),
-          timestamp: new Date(data[0] * 1000).getTime(),
-        }));
-        this.pastCandles = candles.reverse();
+    const end = new Date();
+    // 5 minutes ago
+    const start = new Date(end.getTime() - 5 * 60000);
+    // const start = new Date(end.getTime() - 1000 * 60 * 60 * 24 * 30);
+    this.getProductCandles({
+      id: 'ETH-USD',
+      granularity: 60,
+      startAndEnd: { start, end },
+    }).then((res: any) => {
+      if (!res) {
+        return;
       }
-    );
+      let lastCandleTimestamp =
+        new Date(res[res.length - 1][0] * 1000).getTime() - 60000;
+      const candles: Candle[] = res.reverse().map((data: any) => {
+        const [time, low, high, open, close, volume] = data;
+        const date = new Date(time * 1000);
+        const timestamp = date.getTime();
+        const timeSinceLastCandle = timestamp - lastCandleTimestamp;
+        const candle: Candle = {
+          high,
+          low,
+          open,
+          close,
+          volume,
+          timestamp,
+          timeSinceLastCandle,
+          date,
+          minute: date.getMinutes(),
+        };
+        lastCandleTimestamp = timestamp;
+        return candle;
+      });
+      this.pastCandles = candles;
+      this.lastCandle = candles[candles.length - 1];
+    });
   };
 
   // Likely in another service:
   getProductCandles = async (args: GetProductCandlesArgs) => {
     let url = `${EXCHANGE_URL}/products/${args.id}/candles`;
     console.log(args);
+    // /products/ETH-USD/candles?granularity=60&start=213&end=123'
+    let paramSeparator = '?';
     if (args.granularity) {
-      url += `?granularity=${args.granularity}`;
+      url += `${paramSeparator}granularity=${args.granularity}`;
+      paramSeparator = '&';
     }
 
     if (args.startAndEnd) {
-      url += `?start=${args.startAndEnd.start.toISOString()}&end=${args.startAndEnd.end.toISOString()}`;
+      url += `${paramSeparator}start=${args.startAndEnd.start.toISOString()}&end=${args.startAndEnd.end.toISOString()}`;
     }
 
     console.log(url);

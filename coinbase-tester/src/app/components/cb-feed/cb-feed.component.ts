@@ -16,7 +16,7 @@ export class CbFeedComponent implements OnInit {
   // ticker$ = this.cbFeedSvc.ticker$;
   // l2Update$ = this.cbFeedSvc.l2Update$;
   // heartbeat$ = this.cbFeedSvc.heartbeat$;
-  snapshots = this.cbFeedSvc.snapshots;
+  // snapshots = this.cbFeedSvc.snapshots;
 
   done$ = this.lastMessage$.pipe(filter((msg) => msg.type === 'done'));
   filled$ = this.done$.pipe(filter((msg) => msg.reason === 'filled'));
@@ -30,16 +30,9 @@ export class CbFeedComponent implements OnInit {
 
   types = () => Object.keys(this.cbFeedSvc.allTypes);
 
-  sma = () => this.cbFeedSvc.getSMA();
+  // sma = () => this.cbFeedSvc.getSMA();
 
   currentCandle = () => this.cbFeedSvc.currentCandle;
-  pastCandles = () => this.cbFeedSvc.pastCandles.reverse();
-
-  lastStamp = new Date().getTime();
-  timeBetween = () =>
-    this.cbFeedSvc.pastCandles.map((candle) => {
-      const timeBetween = this.lastStamp - candle.timestamp;
-      this.lastStamp = candle.timestamp;
-      return timeBetween;
-    });
+  lastCandle = () => this.cbFeedSvc.lastCandle;
+  pastCandles = () => this.cbFeedSvc.pastCandles;
 }

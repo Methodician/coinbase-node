@@ -1,24 +1,29 @@
 <h1>Feed Component</h1>
+<h3>Last Candle</h3>
+<pre>
+    {{ lastCandle() | json }}
+</pre>
 <h3>Current Candle</h3>
 <pre>
     {{ currentCandle() | json }}
 </pre>
 
 <h3>Past Candles</h3>
+<section *ngIf="pastCandles().length > 0">
+  <article *ngFor="let candle of pastCandles().reverse()">
+    <pre>{{ candle | json }}</pre>
+  </article>
+</section>
 
-<pre *ngIf="pastCandles().length > 0">
-    {{ pastCandles() | json }}
-</pre>
-
-<pre *ngIf="pastCandles().length > 0">{{ timeBetween() | json }}</pre>
-<!-- <h3>SMA</h3>
-<pre>
-    {{ sma()  | json }}
-</pre>
 <h3>All Types</h3>
 <pre>{{ types() | json }}</pre>
 <h3>subscriptions</h3>
 <pre>{{ subscriptions$ | async | json }}</pre>
+<!-- <h3>SMA</h3>
+<pre>
+    {{ sma()  | json }}
+</pre>
+
 
 <h3>received</h3>
 <pre>{{ received$ | async | json }}</pre>
