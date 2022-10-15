@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
-import { filter, map } from 'rxjs';
-import { CbFeedService } from 'src/app/services/cb-feed.service';
+import { from, map, switchMap } from 'rxjs';
+import { CbFeedService, MergedTrade } from 'src/app/services/cb-feed.service';
 
 @Component({
   selector: 'app-cb-feed',
@@ -8,31 +8,54 @@ import { CbFeedService } from 'src/app/services/cb-feed.service';
   styleUrls: ['./cb-feed.component.scss'],
 })
 export class CbFeedComponent implements OnInit {
-  lastMessage$ = this.cbFeedSvc.lastMessage$;
-  subscriptions$ = this.lastMessage$.pipe(
-    filter((msg) => msg.type === 'subscriptions'),
-    map((msg) => msg.channels)
-  );
-  // ticker$ = this.cbFeedSvc.ticker$;
-  // l2Update$ = this.cbFeedSvc.l2Update$;
-  // heartbeat$ = this.cbFeedSvc.heartbeat$;
-  // snapshots = this.cbFeedSvc.snapshots;
+  socketTrades: MergedTrade[] = [];
 
-  done$ = this.lastMessage$.pipe(filter((msg) => msg.type === 'done'));
-  filled$ = this.done$.pipe(filter((msg) => msg.reason === 'filled'));
-  received$ = this.lastMessage$.pipe(filter((msg) => msg.type === 'received'));
-  open$ = this.lastMessage$.pipe(filter((msg) => msg.type === 'open'));
-  match$ = this.lastMessage$.pipe(filter((msg) => msg.type === 'match'));
+  ethMerge$ = from(this.cbFeedSvc.getMergedMatches('ETH-USD', 220));
 
-  constructor(private cbFeedSvc: CbFeedService) {}
+  constructor(private cbFeedSvc: CbFeedService) {
+    this.ethMerge$
+      .pipe(switchMap((merge) => merge.socket.lastMessage$))
+      .subscribe((msg) => {
+        this.socketTrades.push(this.cbFeedSvc.processTrade(msg, 'ETH-USD'));
+      });
+  }
 
   ngOnInit(): void {}
 
-  types = () => Object.keys(this.cbFeedSvc.allTypes);
+  // temp
+  restIntersectionCount$ = this.ethMerge$.pipe(
+    map((merge) =>
+      merge.restTrades.reduce((acc, trade) => {
+        if (merge.intersectionIds.includes(trade.tradeId)) {
+          acc++;
+        }
+        return acc;
+      }, 0)
+    )
+  );
 
-  // sma = () => this.cbFeedSvc.getSMA();
-
-  currentCandle = () => this.cbFeedSvc.currentCandle;
-  lastCandle = () => this.cbFeedSvc.lastCandle;
-  pastCandles = () => this.cbFeedSvc.pastCandles;
+  activeSocketIntersectionCount$ = this.ethMerge$.pipe(
+    map((merge) =>
+      this.socketTrades.reduce((acc, trade) => {
+        if (
+          merge.socketTrades
+            .map((trade) => trade.tradeId)
+            .includes(trade.tradeId)
+        ) {
+          acc++;
+        }
+        return acc;
+      }, 0)
+    )
+  );
+  socketIntersectionCount$ = this.ethMerge$.pipe(
+    map((merge) =>
+      merge.socketTrades.reduce((acc, trade) => {
+        if (merge.intersectionIds.includes(trade.tradeId)) {
+          acc++;
+        }
+        return acc;
+      }, 0)
+    )
+  );
 }

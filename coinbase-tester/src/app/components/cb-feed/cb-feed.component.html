@@ -1,4 +1,71 @@
 <h1>Feed Component</h1>
+<!-- temp -->
+<h3>Socket Rest Intersection</h3>
+<pre>{{ (ethMerge$ | async)?.intersectionIds }}</pre>
+<h3>Current Trades ({{ activeSocketIntersectionCount$ | async }} matches)</h3>
+<div style="height: 380px; overflow: scroll">
+  <pre
+    *ngFor="let trade of socketTrades"
+    [ngStyle]="{
+      'background-color': (ethMerge$ | async)?.intersectionIds?.includes(
+        trade.tradeId
+      )
+        ? '#73c7af'
+        : '#ffffff'
+    }"
+    >{{ trade | json }}</pre
+  >
+</div>
+<h3>Past Trades</h3>
+<div style="height: 380px; overflow: scroll">
+  <pre
+    *ngFor="let trade of (ethMerge$ | async)?.pastTrades"
+    [ngStyle]="{
+      'background-color': (ethMerge$ | async)?.intersectionIds?.includes(
+        trade.tradeId
+      )
+        ? '#73c7af'
+        : '#ffffff'
+    }"
+    >{{ trade | json }}</pre
+  >
+</div>
+<h3>Websocket Trades ({{ socketIntersectionCount$ | async }} matches)</h3>
+<div style="height: 380px; overflow: scroll">
+  <pre
+    *ngFor="let trade of (ethMerge$ | async)?.socketTrades"
+    [ngStyle]="{
+      'background-color': (ethMerge$ | async)?.intersectionIds?.includes(
+        trade.tradeId
+      )
+        ? '#73c7af'
+        : '#ffffff'
+    }"
+    >{{ trade | json }}</pre
+  >
+</div>
+<h3>Rest Trades ({{ restIntersectionCount$ | async }} matches)</h3>
+<div style="height: 380px; overflow: scroll">
+  <pre
+    *ngFor="let trade of (ethMerge$ | async)?.restTrades"
+    [ngStyle]="{
+      'background-color': (ethMerge$ | async)?.intersectionIds?.includes(
+        trade.tradeId
+      )
+        ? '#73c7af'
+        : '#ffffff'
+    }"
+    >{{ trade | json }}</pre
+  >
+</div>
+
+<!-- end temp -->
+<!-- <h3>All Types</h3>
+<pre>{{ types() | json }}</pre>
+<h3>subscriptions</h3>
+<pre>{{ subscriptions$ | async | json }}</pre>
+<h3>Socket Rest Intersection</h3>
+<pre>{{ socketRestIntersection$ | async | json }}</pre>
 <h3>Last Candle</h3>
 <pre>
     {{ lastCandle() | json }}
@@ -13,12 +80,8 @@
   <article *ngFor="let candle of pastCandles().reverse()">
     <pre>{{ candle | json }}</pre>
   </article>
-</section>
+</section> -->
 
-<h3>All Types</h3>
-<pre>{{ types() | json }}</pre>
-<h3>subscriptions</h3>
-<pre>{{ subscriptions$ | async | json }}</pre>
 <!-- <h3>SMA</h3>
 <pre>
     {{ sma()  | json }}
