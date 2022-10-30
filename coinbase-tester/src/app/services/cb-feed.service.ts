@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { filter, firstValueFrom, Subject, timer } from 'rxjs';
+import { filter, firstValueFrom, from, map, timer } from 'rxjs';
 
 import {
   CbRestService,
@@ -47,20 +47,13 @@ export class CbFeedService {
   constructor(
     private restSvc: CbRestService,
     private socketSvc: CbSocketService
-  ) {
-    this.start();
-  }
+  ) {}
 
-  // May not have a start at all. Could trigger from component to create a merged candle set
-  // Candles may even be another service, along with analytics/signal processing
-  // Must keep in mind all this should translate cleanly to a node server
-  // And this var could be stored where this is triggered...
-  start = () => {
-    this.getMergedMatches('ETH-USD', 221);
-  };
+  getLinearTrades$ = (productId: string, cooldownInMs: number) =>
+    from(this.getLinearTrades(productId, cooldownInMs));
 
-  // Can probably make this observable instead of promise so it can pipe ez.
-  getMergedMatches = async (productId: string, cooldownInMs: number) => {
+  getLinearTrades = async (productId: string, cooldownInMs: number) => {
+    console.log('getting Linear Trades', { productId, cooldownInMs });
     const socket = this.socketSvc.createSocket<MatchMessage>();
     socket.addMatchSubscription([productId]);
 
@@ -70,48 +63,77 @@ export class CbFeedService {
     const socketSubscription = socket.lastMessage$
       .pipe(filter((msg) => msg.type === 'last_match' || msg.type === 'match'))
       .subscribe((msg) => {
+        console.log('socket msg', msg.trade_id);
         socketTrades.push(this.processTrade(msg, productId));
       });
 
-    const restUntilMatch = async (): Promise<number[]> => {
+    const processedTradeStream$ = socket.lastMessage$.pipe(
+      map((msg) => this.processTrade(msg, productId))
+    );
+
+    const getRestTrades = async () => {
       const trades = await this.restSvc.getProductTrades(productId);
       if (!trades) {
-        throw new Error(`No trades found for ${productId}`);
+        throw new Error(`No trades returned for ${productId}`);
       }
-      restTrades = trades.map((trade) => this.processTrade(trade, productId));
-
-      const restIds = restTrades.map((trade) => trade.tradeId);
-      const intersectionIds = socketTrades
-        .map((trade) => trade.tradeId)
-        .filter((tradeId) => restIds.includes(tradeId));
-
-      if (intersectionIds.length) {
-        socketSubscription.unsubscribe();
-        return intersectionIds;
-      } else {
-        await firstValueFrom(timer(cooldownInMs));
-        return restUntilMatch();
-      }
+      return trades.map((trade) => this.processTrade(trade, productId));
     };
 
-    // These trade IDs are always sequential numbers.
-    // I can probably use that to be more efficient.
-    const intersectionIds = await restUntilMatch();
-
-    // Filter out duplicates
-    const pastTrades = [...restTrades, ...socketTrades].filter(
-      (trade, index, trades) => {
-        const tradeIds = trades.map((trade) => trade.tradeId);
-        return tradeIds.indexOf(trade.tradeId) === index;
+    // Could be functional (take in socketTrades and restTrades as args) for composability
+    const checkForIntersection = () => {
+      console.log('checking for intersection');
+      const socketIds = socketTrades.map((trade) => trade.tradeId);
+      const restIds = restTrades.map((trade) => trade.tradeId);
+      const lastSocketId = socketIds[socketIds.length - 1];
+      const firstSocketId = socketIds[0];
+      const firstRestId = restIds[0];
+      // Ensure overlap between rest and socket trades
+      if (lastSocketId >= firstRestId && firstSocketId <= firstRestId) {
+        console.log('intersection found');
+        console.log({ lastSocketId, firstSocketId, firstRestId });
+        return true;
       }
-    );
+      console.log('no intersection found');
+      console.log({ lastSocketId, firstSocketId, firstRestId });
+      return false;
+    };
+
+    // Here we make sure there is some overlap between the socket and rest trades
+    const checkUntilMatch = async () => {
+      await firstValueFrom(timer(cooldownInMs));
+      restTrades = await getRestTrades();
+      const wasIntersectionFound = checkForIntersection();
+      if (wasIntersectionFound) {
+        return;
+      }
+      await checkUntilMatch();
+    };
+
+    await checkUntilMatch();
+
+    // Here we create a continuous history and attempt to transfer the socket watch immediately
+    const transferFeed = () => {
+      const historicalTradesMap: Record<number, MergedTrade> = {};
+      for (let trade of restTrades) {
+        historicalTradesMap[trade.tradeId] = trade;
+      }
+      for (let trade of socketTrades) {
+        historicalTradesMap[trade.tradeId] = trade;
+      }
+      const historicalTrades = Object.values(historicalTradesMap);
+      socketSubscription.unsubscribe();
+      // I believe this could still lead to a very  tight race condition
+      // but if we can miss a single trade without ruining the analysis maybe that is okay...
+      // But, what if that trade is worth fa million dollars? I will just alert in the component for now
+      return {
+        historicalTrades,
+        processedTradeStream$,
+      };
+    };
 
     return {
       socket,
-      intersectionIds,
-      socketTrades,
-      restTrades,
-      pastTrades,
+      transferFeed,
     };
   };
 

@@ -1,62 +1,33 @@
 <h1>Feed Component</h1>
-<!-- temp -->
-<h3>Socket Rest Intersection</h3>
-<pre>{{ (ethMerge$ | async)?.intersectionIds }}</pre>
-<h3>Current Trades ({{ activeSocketIntersectionCount$ | async }} matches)</h3>
-<div style="height: 380px; overflow: scroll">
-  <pre
-    *ngFor="let trade of socketTrades"
-    [ngStyle]="{
-      'background-color': (ethMerge$ | async)?.intersectionIds?.includes(
-        trade.tradeId
-      )
-        ? '#73c7af'
-        : '#ffffff'
-    }"
-    >{{ trade | json }}</pre
-  >
-</div>
-<h3>Past Trades</h3>
-<div style="height: 380px; overflow: scroll">
-  <pre
-    *ngFor="let trade of (ethMerge$ | async)?.pastTrades"
-    [ngStyle]="{
-      'background-color': (ethMerge$ | async)?.intersectionIds?.includes(
-        trade.tradeId
-      )
-        ? '#73c7af'
-        : '#ffffff'
-    }"
-    >{{ trade | json }}</pre
-  >
-</div>
-<h3>Websocket Trades ({{ socketIntersectionCount$ | async }} matches)</h3>
-<div style="height: 380px; overflow: scroll">
-  <pre
-    *ngFor="let trade of (ethMerge$ | async)?.socketTrades"
-    [ngStyle]="{
-      'background-color': (ethMerge$ | async)?.intersectionIds?.includes(
-        trade.tradeId
-      )
-        ? '#73c7af'
-        : '#ffffff'
-    }"
-    >{{ trade | json }}</pre
-  >
-</div>
-<h3>Rest Trades ({{ restIntersectionCount$ | async }} matches)</h3>
-<div style="height: 380px; overflow: scroll">
-  <pre
-    *ngFor="let trade of (ethMerge$ | async)?.restTrades"
-    [ngStyle]="{
-      'background-color': (ethMerge$ | async)?.intersectionIds?.includes(
-        trade.tradeId
-      )
-        ? '#73c7af'
-        : '#ffffff'
-    }"
-    >{{ trade | json }}</pre
-  >
+
+<div *ngIf="ethLine$ | async as ethLine">
+  <h3>Socket Stream Trades</h3>
+  <div style="height: 180px; overflow: scroll">
+    <div
+      *ngFor="let trade of socketTrades; let i = index"
+      [ngStyle]="{
+        'background-color': tradeIds(historicalTrades).includes(trade.tradeId)
+          ? '#73c7af'
+          : '#ffffff'
+      }"
+    >
+      {{ trade.tradeId }} | {{ i }}
+    </div>
+  </div>
+
+  <h3>Historical Trades</h3>
+  <div *ngIf="historicalTrades" style="height: 380px; overflow: scroll">
+    <div
+      *ngFor="let trade of historicalTrades.reverse(); let i = index"
+      [ngStyle]="{
+        'background-color': tradeIds(socketTrades).includes(trade.tradeId)
+          ? '#73c7af'
+          : '#ffffff'
+      }"
+    >
+      {{ trade.tradeId }} | {{ i }}
+    </div>
+  </div>
 </div>
 
 <!-- end temp -->
