@@ -1,29 +1,9 @@
 import { Injectable } from '@angular/core';
 import { filter, firstValueFrom, from, map, timer } from 'rxjs';
 
-import {
-  CbRestService,
-  GetProductCandlesArgs,
-  RestResponseTrade,
-} from './cb-rest.service';
+import { CbRestService, RestResponseTrade } from './cb-rest.service';
 import { BollingerBands, NotEnoughDataError, SMA } from 'trading-signals';
-import {
-  ActiveSocket,
-  CbSocketService,
-  MatchMessage,
-} from './cb-socket.service';
-
-const STARTER_CANDLE: Candle = {
-  high: 0,
-  low: 0,
-  open: 0,
-  close: 0,
-  volume: 0,
-  timestamp: 0,
-  date: new Date(),
-  timeSinceLastCandle: 0,
-  minute: 0,
-};
+import { CbSocketService, MatchMessage } from './cb-socket.service';
 
 @Injectable({
   providedIn: 'root',
@@ -34,26 +14,13 @@ export class CbFeedService {
   // Although, there may be viable exceptions where the scale should move away from the signal...
   // (basically as a lose stop loss)
 
-  currentMinute?: number;
-
-  currentCandle: Candle = STARTER_CANDLE;
-  lastCandle: Candle = STARTER_CANDLE;
-
-  // Should be able to derive other candle intervals from this
-  // todo: store in db (possibly in chunks or nested by day/hour/minute)
-  // Then keep track of a relevant subset of candles in memory
-  pastCandles: Candle[] = [];
-
   constructor(
     private restSvc: CbRestService,
     private socketSvc: CbSocketService
   ) {}
 
-  getLinearTrades$ = (productId: string, cooldownInMs: number) =>
-    from(this.getLinearTrades(productId, cooldownInMs));
-
+  // candidate for rename
   getLinearTrades = async (productId: string, cooldownInMs: number) => {
-    console.log('getting Linear Trades', { productId, cooldownInMs });
     const socket = this.socketSvc.createSocket<MatchMessage>();
     socket.addMatchSubscription([productId]);
 
@@ -63,15 +30,17 @@ export class CbFeedService {
     const socketSubscription = socket.lastMessage$
       .pipe(filter((msg) => msg.type === 'last_match' || msg.type === 'match'))
       .subscribe((msg) => {
-        console.log('socket msg', msg.trade_id);
         socketTrades.push(this.processTrade(msg, productId));
       });
 
-    const processedTradeStream$ = socket.lastMessage$.pipe(
+    const tradeStream$ = socket.lastMessage$.pipe(
+      filter((msg) => msg.type === 'match'),
       map((msg) => this.processTrade(msg, productId))
     );
 
     const getRestTrades = async () => {
+      // May want to pass in specifics to get more than a few minutes of history
+      // or give in and get candles from rest and build my own and/or reconcile
       const trades = await this.restSvc.getProductTrades(productId);
       if (!trades) {
         throw new Error(`No trades returned for ${productId}`);
@@ -127,7 +96,7 @@ export class CbFeedService {
       // But, what if that trade is worth fa million dollars? I will just alert in the component for now
       return {
         historicalTrades,
-        processedTradeStream$,
+        tradeStream$,
       };
     };
 
@@ -135,41 +104,6 @@ export class CbFeedService {
       socket,
       transferFeed,
     };
-  };
-
-  getCandles = (args: GetProductCandlesArgs) => {
-    // const end = new Date();
-    // 5 minutes ago
-    // const start = new Date(end.getTime() - 5 * 60000);
-    // const start = new Date(end.getTime() - 1000 * 60 * 60 * 24 * 30);
-    this.restSvc.getProductCandles(args).then((res: any) => {
-      if (!res) {
-        return;
-      }
-      let lastCandleTimestamp =
-        new Date(res[res.length - 1][0] * 1000).getTime() - 60000;
-      const candles: Candle[] = res.reverse().map((data: any) => {
-        const [time, low, high, open, close, volume] = data;
-        const date = new Date(time * 1000);
-        const timestamp = date.getTime();
-        const timeSinceLastCandle = timestamp - lastCandleTimestamp;
-        const candle: Candle = {
-          high,
-          low,
-          open,
-          close,
-          volume,
-          timestamp,
-          timeSinceLastCandle,
-          date,
-          minute: date.getMinutes(),
-        };
-        lastCandleTimestamp = timestamp;
-        return candle;
-      });
-      this.pastCandles = candles;
-      this.lastCandle = candles[candles.length - 1];
-    });
   };
 
   // === HELPERS ===
@@ -196,25 +130,4 @@ export type MergedTrade = {
   side: 'buy' | 'sell';
   tradeId: number;
   productId: string;
-};
-
-export type MergedTrades<T> = {
-  pastTrades: MergedTrade[];
-  socket: ActiveSocket<T>;
-  // temp
-  intersection: number[];
-};
-
-// Maybe a new CandleService could manage these things
-// Some of these number types could be Big numbers
-type Candle = {
-  high: number;
-  low: number;
-  open: number;
-  close: number;
-  volume: number;
-  timestamp: number;
-  date: Date;
-  minute: number;
-  timeSinceLastCandle: number; // For testing only (I think, since it is theoretically inferrable)
 };
