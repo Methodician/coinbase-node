@@ -41,7 +41,7 @@ export class CbFeedService {
     const getRestTrades = async () => {
       // May want to pass in specifics to get more than a few minutes of history
       // or give in and get candles from rest and build my own and/or reconcile
-      const trades = await this.restSvc.getProductTrades(productId);
+      const trades = await this.restSvc.getProductTrades({ productId });
       if (!trades) {
         throw new Error(`No trades returned for ${productId}`);
       }
@@ -59,11 +59,11 @@ export class CbFeedService {
       // Ensure overlap between rest and socket trades
       if (lastSocketId >= firstRestId && firstSocketId <= firstRestId) {
         console.log('intersection found');
-        console.log({ lastSocketId, firstSocketId, firstRestId });
+        // console.log({ lastSocketId, firstSocketId, firstRestId });
         return true;
       }
       console.log('no intersection found');
-      console.log({ lastSocketId, firstSocketId, firstRestId });
+      // console.log({ lastSocketId, firstSocketId, firstRestId });
       return false;
     };
 

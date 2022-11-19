@@ -1,8 +1,5 @@
 <h1>Candle Component</h1>
-<h3>Current Candle</h3>
-<pre>
-    {{ currentCandle() | json }}
-</pre>
+
 <h3>Past Candles</h3>
 <pre *ngFor="let candle of pastCandles">
     {{ candle | json }}

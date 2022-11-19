@@ -8,20 +8,42 @@ const EXCHANGE_URL = 'https://api.exchange.coinbase.com';
 })
 export class CbRestService {
   constructor() {}
-  getProductTrades = async (productId: string) => {
+
+  getProductTrades = async (args: GetProductTradesArgs) => {
+    console.log('getProductTrades', args);
+    const { productId, after, before, limit } = args;
     let url = `https://api.exchange.coinbase.com/products/${productId}/trades`;
+    let paramSeparator = '?';
+    // console.log(url);
+    if (after) {
+      url += `${paramSeparator}after=${after}`;
+      paramSeparator = '&';
+    }
+    // console.log(url);
+    if (before) {
+      url += `${paramSeparator}before=${before}`;
+      paramSeparator = '&';
+    }
+    // console.log(url);
+    if (limit) {
+      url += `${paramSeparator}limit=${limit}`;
+      paramSeparator = '&';
+    }
+    // console.log(url);
+
     const options = {
       method: 'GET',
       url,
       headers: { accept: 'application/json' },
     };
 
-    return axios
-      .request<RestResponseTrade[]>(options)
-      .then((res) => res.data)
-      .catch((err) => {
-        logError(err);
-      });
+    try {
+      const res = await axios.request<RestResponseTrade[]>(options);
+      return res.data;
+    } catch (error) {
+      logError(error);
+      return [];
+    }
   };
 
   getProductCandles = async (args: GetProductCandlesArgs) => {
@@ -59,6 +81,10 @@ export class CbRestService {
       price: Number(price),
       size: Number(size),
       date: new Date(time),
+      // Interesting note: buy is a downtick and sell is an uptick.
+      // Intuitive when you pause. It's maker side.
+      // When buyer is taker, they taking the below-market price
+      // When seller is taker, they taking the above-market price
       side: side === 'buy' ? 'buy' : 'sell',
       tradeId: trade_id,
       productId,
@@ -84,6 +110,13 @@ export type GetProductCandlesArgs = {
   productId: string;
   granularity?: CandleGranularity;
   startAndEnd?: StartAndEnd;
+};
+
+export type GetProductTradesArgs = {
+  productId: string;
+  limit?: number;
+  before?: number;
+  after?: number;
 };
 
 export type RestResponseTrade = {

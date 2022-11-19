@@ -7,11 +7,10 @@ import { Candle, CandleService } from 'src/app/services/candle.service';
   styleUrls: ['./candle.component.scss'],
 })
 export class CandleComponent implements OnInit {
-  pastCandles = this.candleSvc.pastCandles;
-  currentCandle = () => this.candleSvc.currentCandle;
+  pastCandles = this.candleSvc.candles;
 
   constructor(private candleSvc: CandleService) {
-    this.candleSvc.buildCandles('ETH-USD');
+    this.candleSvc.buildInitialCandles('ETH-USD');
   }
 
   ngOnInit(): void {}
