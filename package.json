@@ -1,5 +1,8 @@
 {
   "devDependencies": {
     "@angular/cli": "^14.2.3"
+  },
+  "dependencies": {
+    "big.js": "^6.2.1"
   }
 }

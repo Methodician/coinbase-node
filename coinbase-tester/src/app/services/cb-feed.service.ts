@@ -1,9 +1,16 @@
 import { Injectable } from '@angular/core';
 import { filter, firstValueFrom, from, map, timer } from 'rxjs';
 
-import { CbRestService, RestResponseTrade } from './cb-rest.service';
+import {
+  CbRestService,
+  GetProductCandlesArgs,
+  GetProductTradesArgs,
+  RestResponseTrade,
+} from './cb-rest.service';
 import { BollingerBands, NotEnoughDataError, SMA } from 'trading-signals';
 import { CbSocketService, MatchMessage } from './cb-socket.service';
+import Big from 'big.js';
+import { Candle } from './candle.service';
 
 @Injectable({
   providedIn: 'root',
@@ -18,6 +25,21 @@ export class CbFeedService {
     private restSvc: CbRestService,
     private socketSvc: CbSocketService
   ) {}
+
+  getCbCandles = async (args: GetProductCandlesArgs) => {
+    const res = await this.restSvc.getProductCandles(args);
+    return res.map((candle: any) => this.processCandle(candle));
+  };
+
+  getCbTrades = async (args: GetProductTradesArgs) => {
+    const { cbBefore, cbAfter, cbTrades } = await this.restSvc.getProductTrades(
+      args
+    );
+    const trades = cbTrades.map((trade) =>
+      this.processTrade(trade, args.productId)
+    );
+    return { cbBefore, cbAfter, trades };
+  };
 
   // candidate for rename
   getLinearTrades = async (productId: string, cooldownInMs: number) => {
@@ -37,16 +59,6 @@ export class CbFeedService {
       filter((msg) => msg.type === 'match'),
       map((msg) => this.processTrade(msg, productId))
     );
-
-    const getRestTrades = async () => {
-      // May want to pass in specifics to get more than a few minutes of history
-      // or give in and get candles from rest and build my own and/or reconcile
-      const trades = await this.restSvc.getProductTrades({ productId });
-      if (!trades) {
-        throw new Error(`No trades returned for ${productId}`);
-      }
-      return trades.map((trade) => this.processTrade(trade, productId));
-    };
 
     // Could be functional (take in socketTrades and restTrades as args) for composability
     const checkForIntersection = () => {
@@ -70,7 +82,11 @@ export class CbFeedService {
     // Here we make sure there is some overlap between the socket and rest trades
     const checkUntilMatch = async () => {
       await firstValueFrom(timer(cooldownInMs));
-      restTrades = await getRestTrades();
+      const { trades } = await this.getCbTrades({
+        productId,
+      });
+      restTrades = trades;
+
       const wasIntersectionFound = checkForIntersection();
       if (wasIntersectionFound) {
         return;
@@ -107,6 +123,36 @@ export class CbFeedService {
   };
 
   // === HELPERS ===
+
+  processCandle = (
+    candle: [number, number, number, number, number, number]
+  ): Candle => {
+    const [time, cbLow, cbHigh, cbOpen, cbClose, cbVolume] = candle;
+    const high = Big(cbHigh);
+    const low = Big(cbLow);
+    const open = Big(cbOpen);
+    const close = Big(cbClose);
+    const volume = Big(cbVolume);
+    const date = new Date(time * 1000);
+    const timestamp = date.getTime();
+    const minute = date.getMinutes();
+    return {
+      high,
+      low,
+      open,
+      close,
+      volume,
+      date,
+      timestamp,
+      minute,
+    };
+  };
+
+  processTrades = (
+    trades: RestResponseTrade[],
+    productId: string
+  ): MergedTrade[] =>
+    trades.map((trade) => this.processTrade(trade, productId));
 
   // note the typing needs work. This will let undefined productId through.
   processTrade = (

@@ -1,35 +1,59 @@
 import { Injectable } from '@angular/core';
 import axios from 'axios';
+import { BehaviorSubject } from 'rxjs';
+import { Candle } from './candle.service';
 import { MergedTrade } from './cb-feed.service';
+import { MatchMessage } from './cb-socket.service';
 const EXCHANGE_URL = 'https://api.exchange.coinbase.com';
 
 @Injectable({
   providedIn: 'root',
 })
 export class CbRestService {
+  // wait why did I make these BehaviorSubjects?
+  cbBefore$ = new BehaviorSubject<string>('');
+  cbAfter$ = new BehaviorSubject<string>('');
+
   constructor() {}
 
+  getEarlierProductTradesPage = async (productId: string) => {
+    const before = this.cbBefore$.value;
+    if (!before.length) {
+      throw new Error(
+        "cbBefore pagination value is not set. Can't get earlier trades"
+      );
+    }
+    console.log({ before });
+    return this.getProductTrades({ productId, before });
+  };
+
+  getLaterProductTradesPage = async (productId: string) => {
+    const after = this.cbAfter$.value;
+    if (!after.length) {
+      throw new Error(
+        "cbAfter pagination value is not set. Can't get later trades"
+      );
+    }
+    console.log({ after });
+    return this.getProductTrades({ productId, after });
+  };
+
   getProductTrades = async (args: GetProductTradesArgs) => {
-    console.log('getProductTrades', args);
     const { productId, after, before, limit } = args;
     let url = `https://api.exchange.coinbase.com/products/${productId}/trades`;
     let paramSeparator = '?';
-    // console.log(url);
     if (after) {
       url += `${paramSeparator}after=${after}`;
       paramSeparator = '&';
     }
-    // console.log(url);
     if (before) {
       url += `${paramSeparator}before=${before}`;
       paramSeparator = '&';
     }
-    // console.log(url);
     if (limit) {
       url += `${paramSeparator}limit=${limit}`;
       paramSeparator = '&';
     }
-    // console.log(url);
 
     const options = {
       method: 'GET',
@@ -39,10 +63,17 @@ export class CbRestService {
 
     try {
       const res = await axios.request<RestResponseTrade[]>(options);
-      return res.data;
+      const { data, headers } = res;
+      const cbTrades = data;
+      const cbBefore = headers['cb-before'];
+      const cbAfter = headers['cb-after'];
+      this.cbBefore$.next(cbBefore);
+      this.cbAfter$.next(cbAfter);
+      // may not need to return cbBefore and cbAfter
+      return { cbTrades, cbBefore, cbAfter };
     } catch (error) {
       logError(error);
-      return [];
+      return { cbTrades: [], cbBefore: null, cbAfter: null };
     }
   };
 
@@ -72,23 +103,6 @@ export class CbRestService {
       logError(error);
     }
   };
-
-  processTrades = (
-    trades: RestResponseTrade[],
-    productId: string
-  ): MergedTrade[] =>
-    trades.map(({ price, size, time, trade_id, side }) => ({
-      price: Number(price),
-      size: Number(size),
-      date: new Date(time),
-      // Interesting note: buy is a downtick and sell is an uptick.
-      // Intuitive when you pause. It's maker side.
-      // When buyer is taker, they taking the below-market price
-      // When seller is taker, they taking the above-market price
-      side: side === 'buy' ? 'buy' : 'sell',
-      tradeId: trade_id,
-      productId,
-    }));
 }
 
 const logError = (error: any) => {
@@ -115,8 +129,9 @@ export type GetProductCandlesArgs = {
 export type GetProductTradesArgs = {
   productId: string;
   limit?: number;
-  before?: number;
-  after?: number;
+  // maybe these should only be strings
+  before?: number | string;
+  after?: number | string;
 };
 
 export type RestResponseTrade = {

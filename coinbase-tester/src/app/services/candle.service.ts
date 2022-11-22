@@ -1,17 +1,8 @@
 import { Injectable } from '@angular/core';
+import { BehaviorSubject } from 'rxjs';
 import { CbFeedService, MergedTrade } from './cb-feed.service';
-
-const STARTER_CANDLE = {
-  high: 0,
-  low: 0,
-  open: 0,
-  close: 0,
-  volume: 0,
-  timestamp: 0,
-  date: new Date(),
-  timeSinceLastCandle: 0,
-  minute: 0,
-};
+import { CbRestService } from './cb-rest.service';
+import { Big } from 'big.js';
 
 @Injectable({
   providedIn: 'root',
@@ -28,11 +19,28 @@ export class CandleService {
   // Could probably just grab candles from REST API instead of storing them
   // Then keep track of a relevant subset of candles in memory
   candles: Candle[] = [];
-  constructor(private feedSvc: CbFeedService) {}
+  wasTradeHistoryProcessed$ = new BehaviorSubject(false);
+  currentMinute$ = new BehaviorSubject(0);
+  // rename me
+  syncedCandles: Candle[] = [];
+
+  constructor(private feedSvc: CbFeedService, private restSvc: CbRestService) {}
+
+  getRestCandles = async (productId: string) => {
+    const res = await this.feedSvc.getCbCandles({
+      productId,
+      granularity: 60,
+    });
+
+    return res;
+  };
+
+  // Well now that I tried putting the rest candles beside my own I see there is virtually no discrepancy
+  // I may go so far as to say that I only need to keep track of the current candle.
+  // I could get the last one from REST each time a minute ticks over...
 
   buildInitialCandles = async (productId: string) => {
     let wasContinuityChecked = false;
-    let isTradeHistoryProcessed = false;
     const { transferFeed } = await this.feedSvc.getLinearTrades(productId, 200);
     const { historicalTrades, tradeStream$ } = transferFeed();
     // attempt to reconcile history with stream
@@ -40,7 +48,6 @@ export class CandleService {
       if (!wasContinuityChecked) {
         // ensure the final trade from history is just before the first trade in stream
         // Maybe not the best place for this check, but for now...
-        wasContinuityChecked = true;
         const lastHistoricalId =
           historicalTrades[historicalTrades.length - 1].tradeId;
         const firstStreamId = trade.tradeId;
@@ -49,14 +56,17 @@ export class CandleService {
         }
         wasContinuityChecked = true;
       }
-      if (!isTradeHistoryProcessed) {
+      if (!this.wasTradeHistoryProcessed$.value) {
         // process historical trades before stream
         console.log('creating historical candles');
         this.createHistoricalCandles(historicalTrades);
-        isTradeHistoryProcessed = true;
+        this.wasTradeHistoryProcessed$.next(true);
+        this.wasTradeHistoryProcessed$.complete();
       }
       this.addTradeToSet(trade, this.candles);
     });
+    const restCandles = await this.getRestCandles(productId);
+    this.syncedCandles = restCandles;
   };
 
   createHistoricalCandles = (trades: MergedTrade[]) => {
@@ -65,35 +75,52 @@ export class CandleService {
     }
   };
 
+  createCandleSet = (trades: MergedTrade[]) => {
+    const candles: Candle[] = [];
+    for (let trade of trades) {
+      this.addTradeToSet(trade, candles);
+    }
+    return candles;
+  };
+
   addTradeToSet = (trade: MergedTrade, candles: Candle[]) => {
     const { price, size, date } = trade;
+    const bPrice = new Big(price);
+    const bSize = new Big(size);
     const timestamp = date.getTime();
     const minute = date.getMinutes();
+    if (minute !== this.currentMinute$.value) {
+      this.currentMinute$.next(minute);
+    }
     const lastMinute = candles[candles.length - 1]?.minute ?? minute;
 
     if (minute !== lastMinute || !candles.length) {
       // create new candle
       const newCandle = {
-        high: price,
-        low: price,
-        open: price,
-        close: price,
-        volume: size,
+        high: bPrice,
+        low: bPrice,
+        open: bPrice,
+        close: bPrice,
+        volume: bSize,
         timestamp,
         date,
-        timeSinceLastCandle: 0,
         minute,
       };
       candles.push(newCandle);
     } else {
       // update current candle
       const currentCandle = candles[candles.length - 1];
-      currentCandle.high = Math.max(currentCandle.high, price);
-      currentCandle.low = Math.min(currentCandle.low, price);
-      currentCandle.close = price;
-      currentCandle.volume += size;
-      currentCandle.timeSinceLastCandle =
-        timestamp - candles[candles.length - 2]?.timestamp || 0;
+      currentCandle.high = bPrice.gt(currentCandle.high)
+        ? bPrice
+        : currentCandle.high;
+      // Math.max(currentCandle.high, price);
+      currentCandle.low = bPrice.gt(currentCandle.low)
+        ? currentCandle.low
+        : bPrice;
+      // Math.min(currentCandle.low, price);
+      currentCandle.close = bPrice;
+      currentCandle.volume = currentCandle.volume.plus(bSize);
+      // currentCandle.volume += size;
       currentCandle.timestamp = timestamp;
     }
   };
@@ -102,13 +129,12 @@ export class CandleService {
 // Maybe a new CandleService could manage these things
 // Some of these number types could be Big numbers
 export type Candle = {
-  high: number;
-  low: number;
-  open: number;
-  close: number;
-  volume: number;
+  high: Big;
+  low: Big;
+  open: Big;
+  close: Big;
+  volume: Big;
   timestamp: number;
   date: Date;
   minute: number;
-  timeSinceLastCandle: number; // For testing only (I think, since it is theoretically inferrable)
 };

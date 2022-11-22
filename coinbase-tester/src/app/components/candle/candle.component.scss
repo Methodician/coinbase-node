@@ -1,0 +1,12 @@
+.horizon {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+
+  .vert {
+    display: flex;
+    flex-direction: column-reverse;
+    overflow-y: scroll;
+    max-height: 800px;
+  }
+}

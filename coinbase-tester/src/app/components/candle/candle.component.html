@@ -1,6 +1,23 @@
 <h1>Candle Component</h1>
-
-<h3>Past Candles</h3>
-<pre *ngFor="let candle of pastCandles">
+<div class="horizon">
+  <div class="vert">
+    <h3>REST Candles</h3>
+    <pre *ngFor="let candle of restCandles">
     {{ candle | json }}
-</pre>
+    </pre>
+  </div>
+  <div class="vert">
+    <h3>Socket Candles</h3>
+    <pre *ngFor="let candle of socketCandles()">
+          {{ candle | json }}
+      </pre
+    >
+  </div>
+  <div class="vert">
+    <h3>All Candles</h3>
+    <pre *ngFor="let candle of allCandles()">
+            {{ candle | json }}
+        </pre
+    >
+  </div>
+</div>
