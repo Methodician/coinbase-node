@@ -28,7 +28,8 @@ export class CbFeedService {
 
   getCbCandles = async (args: GetProductCandlesArgs) => {
     const res = await this.restSvc.getProductCandles(args);
-    return res.map((candle: any) => this.processCandle(candle));
+
+    return res.map((candle: any) => this.processCandle(candle)) as Candle[];
   };
 
   getCbTrades = async (args: GetProductTradesArgs) => {
@@ -159,8 +160,8 @@ export class CbFeedService {
     match: MatchMessage | RestResponseTrade,
     productId: string
   ): MergedTrade => ({
-    price: Number(match.price),
-    size: Number(match.size),
+    price: Big(match.price),
+    size: Big(match.size),
     date: new Date(match.time),
     side: match.side,
     tradeId: match.trade_id,
@@ -170,8 +171,8 @@ export class CbFeedService {
 
 // Models (should go elsewhere one day)
 export type MergedTrade = {
-  price: number;
-  size: number;
+  price: Big;
+  size: Big;
   date: Date;
   side: 'buy' | 'sell';
   tradeId: number;

@@ -19,6 +19,7 @@ export class CandleService {
   // Could probably just grab candles from REST API instead of storing them
   // Then keep track of a relevant subset of candles in memory
   candles: Candle[] = [];
+  currentCandle?: Candle;
   wasTradeHistoryProcessed$ = new BehaviorSubject(false);
   currentMinute$ = new BehaviorSubject(0);
   // rename me
@@ -58,71 +59,93 @@ export class CandleService {
       }
       if (!this.wasTradeHistoryProcessed$.value) {
         // process historical trades before stream
-        console.log('creating historical candles');
-        this.createHistoricalCandles(historicalTrades);
+        for (let trade of historicalTrades) {
+          this.addTrade(trade);
+        }
         this.wasTradeHistoryProcessed$.next(true);
         this.wasTradeHistoryProcessed$.complete();
       }
-      this.addTradeToSet(trade, this.candles);
+      this.addTrade(trade);
     });
+
+    this.wasTradeHistoryProcessed$.subscribe(async (wasProcessed) => {
+      if (wasProcessed) {
+        this.initializeSyncedCandlesRecursive(productId);
+      }
+    });
+  };
+
+  initializeSyncedCandlesRecursive = async (productId: string) => {
     const restCandles = await this.getRestCandles(productId);
-    this.syncedCandles = restCandles;
-  };
-
-  createHistoricalCandles = (trades: MergedTrade[]) => {
-    for (let trade of trades) {
-      this.addTradeToSet(trade, this.candles);
+    this.syncedCandles = restCandles.reverse();
+    const poppedCandle = this.syncedCandles.pop();
+    if (poppedCandle?.minute !== this.currentCandle?.minute) {
+      setTimeout(() => {
+        this.initializeSyncedCandlesRecursive(productId);
+      }, 500);
     }
   };
 
-  createCandleSet = (trades: MergedTrade[]) => {
-    const candles: Candle[] = [];
-    for (let trade of trades) {
-      this.addTradeToSet(trade, candles);
-    }
-    return candles;
+  resetCurrentCandle = (
+    price: Big,
+    size: Big,
+    timestamp: number,
+    date: Date,
+    minute: number
+  ) => {
+    this.currentCandle = {
+      high: price,
+      low: price,
+      open: price,
+      close: price,
+      volume: size,
+      date,
+      timestamp,
+      minute,
+    };
   };
 
-  addTradeToSet = (trade: MergedTrade, candles: Candle[]) => {
+  addTrade = (trade: MergedTrade) => {
     const { price, size, date } = trade;
-    const bPrice = new Big(price);
-    const bSize = new Big(size);
     const timestamp = date.getTime();
     const minute = date.getMinutes();
-    if (minute !== this.currentMinute$.value) {
-      this.currentMinute$.next(minute);
-    }
-    const lastMinute = candles[candles.length - 1]?.minute ?? minute;
 
-    if (minute !== lastMinute || !candles.length) {
-      // create new candle
-      const newCandle = {
-        high: bPrice,
-        low: bPrice,
-        open: bPrice,
-        close: bPrice,
-        volume: bSize,
-        timestamp,
-        date,
-        minute,
-      };
-      candles.push(newCandle);
+    if (!this.currentCandle) {
+      this.resetCurrentCandle(price, size, timestamp, date, minute);
     } else {
-      // update current candle
-      const currentCandle = candles[candles.length - 1];
-      currentCandle.high = bPrice.gt(currentCandle.high)
-        ? bPrice
-        : currentCandle.high;
-      // Math.max(currentCandle.high, price);
-      currentCandle.low = bPrice.gt(currentCandle.low)
-        ? currentCandle.low
-        : bPrice;
-      // Math.min(currentCandle.low, price);
-      currentCandle.close = bPrice;
-      currentCandle.volume = currentCandle.volume.plus(bSize);
-      // currentCandle.volume += size;
-      currentCandle.timestamp = timestamp;
+      if (this.currentCandle.minute !== minute) {
+        this.currentMinute$.next(minute);
+        if (this.wasTradeHistoryProcessed$.value) {
+          this.syncedCandles.push(this.currentCandle);
+        }
+        this.resetCurrentCandle(price, size, timestamp, date, minute);
+      } else {
+        if (price.gt(this.currentCandle.high)) {
+          this.currentCandle.high = price;
+        }
+        if (price.lt(this.currentCandle.low)) {
+          this.currentCandle.low = price;
+        }
+        this.currentCandle.close = price;
+        this.currentCandle.volume = this.currentCandle.volume.plus(size);
+        this.currentCandle.timestamp = timestamp;
+      }
     }
+  };
+
+  // helpers
+  logCandle = (candle: Candle) => {
+    const loggable = {
+      high: candle?.high.toString(),
+      low: candle?.low.toString(),
+      open: candle?.open.toString(),
+      close: candle?.close.toString(),
+      volume: candle?.volume.toString(),
+      date: candle?.date,
+      timestamp: candle?.timestamp,
+      minute: candle?.minute,
+    };
+    console.log(loggable);
   };
 }
 

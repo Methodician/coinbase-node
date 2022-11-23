@@ -5,8 +5,11 @@
 
   .vert {
     display: flex;
-    flex-direction: column-reverse;
-    overflow-y: scroll;
+    flex-direction: column;
     max-height: 800px;
+
+    .candles {
+      overflow-y: scroll;
+    }
   }
 }

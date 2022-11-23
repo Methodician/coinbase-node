@@ -2,22 +2,32 @@
 <div class="horizon">
   <div class="vert">
     <h3>REST Candles</h3>
-    <pre *ngFor="let candle of restCandles">
-    {{ candle | json }}
-    </pre>
+    <div class="candles">
+      <pre *ngFor="let candle of restCandles">
+        {{ candle | json }}
+        </pre
+      >
+    </div>
   </div>
   <div class="vert">
     <h3>Socket Candles</h3>
-    <pre *ngFor="let candle of socketCandles()">
-          {{ candle | json }}
-      </pre
-    >
+    <div class="candles">
+      <h4>current</h4>
+      <pre>{{ currentCandle() | json }}</pre>
+      <h4>set</h4>
+      <pre *ngFor="let candle of socketCandles()">
+                {{ candle | json }}
+            </pre
+      >
+    </div>
   </div>
   <div class="vert">
-    <h3>All Candles</h3>
-    <pre *ngFor="let candle of allCandles()">
-            {{ candle | json }}
-        </pre
-    >
+    <h3>Synced Candles</h3>
+    <div class="candles">
+      <pre *ngFor="let candle of syncedCandles()">
+                {{ candle | json }}
+            </pre
+      >
+    </div>
   </div>
 </div>
