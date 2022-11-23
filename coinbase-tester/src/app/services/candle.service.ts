@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, combineLatest, debounceTime, Observable } from 'rxjs';
 import { CbFeedService, MergedTrade } from './cb-feed.service';
 import { CbRestService } from './cb-rest.service';
 import { Big } from 'big.js';
@@ -36,14 +36,63 @@ export class CandleService {
     return res;
   };
 
-  // Well now that I tried putting the rest candles beside my own I see there is virtually no discrepancy
-  // I may go so far as to say that I only need to keep track of the current candle.
-  // I could get the last one from REST each time a minute ticks over...
-
-  buildInitialCandles = async (productId: string) => {
+  buildCandleStream = (
+    historicalTrades: MergedTrade[],
+    tradeStream$: Observable<MergedTrade>
+  ) => {
     let wasContinuityChecked = false;
-    const { transferFeed } = await this.feedSvc.getLinearTrades(productId, 200);
-    const { historicalTrades, tradeStream$ } = transferFeed();
+    const wasTradeHistoryProcessed$ = new BehaviorSubject(false);
+    const currentMinute$ = new BehaviorSubject(0);
+    const currentCandle$ = new BehaviorSubject<Candle | undefined>(undefined);
+
+    const addTrade = (trade: MergedTrade) => {
+      const { price, size, date } = trade;
+      const minute = date.getMinutes();
+      const timestamp = date.getTime();
+
+      if (!currentCandle$.value) {
+        currentCandle$.next({
+          high: price,
+          low: price,
+          open: price,
+          close: price,
+          volume: size,
+          date,
+          timestamp,
+          minute,
+        });
+      } else {
+        if (currentCandle$.value.minute !== minute) {
+          // minute gets iterated before candle
+          // This lets buildSyncedCandles know to push the candle before it ticks over
+          currentMinute$.next(minute);
+          currentCandle$.next({
+            high: price,
+            low: price,
+            open: price,
+            close: price,
+            volume: size,
+            date,
+            timestamp,
+            minute,
+          });
+        } else {
+          const currentCandle = currentCandle$.value;
+          const { high, low, open, volume } = currentCandle;
+
+          currentCandle$.next({
+            high: price.gt(high) ? price : high,
+            low: price.lt(low) ? price : low,
+            open,
+            close: price,
+            volume: volume.plus(size),
+            date,
+            timestamp,
+            minute,
+          });
+        }
+      }
+    };
     // attempt to reconcile history with stream
     tradeStream$.subscribe((trade) => {
       if (!wasContinuityChecked) {
@@ -57,80 +106,57 @@ export class CandleService {
         }
         wasContinuityChecked = true;
       }
-      if (!this.wasTradeHistoryProcessed$.value) {
+      if (!wasTradeHistoryProcessed$.value) {
         // process historical trades before stream
         for (let trade of historicalTrades) {
-          this.addTrade(trade);
+          addTrade(trade);
         }
-        this.wasTradeHistoryProcessed$.next(true);
-        this.wasTradeHistoryProcessed$.complete();
+        wasTradeHistoryProcessed$.next(true);
+        wasTradeHistoryProcessed$.complete();
       }
-      this.addTrade(trade);
+      addTrade(trade);
     });
 
-    this.wasTradeHistoryProcessed$.subscribe(async (wasProcessed) => {
-      if (wasProcessed) {
-        this.initializeSyncedCandlesRecursive(productId);
-      }
-    });
+    return { currentCandle$, currentMinute$, wasTradeHistoryProcessed$ };
   };
 
-  initializeSyncedCandlesRecursive = async (productId: string) => {
-    const restCandles = await this.getRestCandles(productId);
-    this.syncedCandles = restCandles.reverse();
-    const poppedCandle = this.syncedCandles.pop();
-    if (poppedCandle?.minute !== this.currentCandle?.minute) {
-      setTimeout(() => {
-        this.initializeSyncedCandlesRecursive(productId);
-      }, 500);
-    }
-  };
-
-  resetCurrentCandle = (
-    price: Big,
-    size: Big,
-    timestamp: number,
-    date: Date,
-    minute: number
+  buildSyncedCandles = async (
+    productId: string,
+    candleStream$: BehaviorSubject<Candle>,
+    currentMinute$: BehaviorSubject<number>
   ) => {
-    this.currentCandle = {
-      high: price,
-      low: price,
-      open: price,
-      close: price,
-      volume: size,
-      date,
-      timestamp,
-      minute,
-    };
-  };
+    const syncUp = () =>
+      new Promise<Candle[]>((resolve, reject) => {
+        const recurse = async () => {
+          try {
+            console.log('syncing up');
+            const candles = await this.getRestCandles(productId);
+            candles.reverse();
+            const poppedCandle = candles.pop();
+            if (poppedCandle?.minute !== currentMinute$.value) {
+              setTimeout(recurse, 350);
+            } else {
+              resolve(candles);
+            }
+          } catch (error) {
+            reject(error);
+          }
+        };
+        recurse();
+      });
 
-  addTrade = (trade: MergedTrade) => {
-    const { price, size, date } = trade;
-    const timestamp = date.getTime();
-    const minute = date.getMinutes();
-
-    if (!this.currentCandle) {
-      this.resetCurrentCandle(price, size, timestamp, date, minute);
-    } else {
-      if (this.currentCandle.minute !== minute) {
-        this.currentMinute$.next(minute);
-        if (this.wasTradeHistoryProcessed$.value) {
-          this.syncedCandles.push(this.currentCandle);
+    const candles = await syncUp();
+    combineLatest([candleStream$, currentMinute$]).subscribe(
+      ([candle, minute]) => {
+        // Feels a little hacky and redundant but not sure maybe great
+        // See comment in this.buildCandleStream
+        if (minute !== candle.minute) {
+          candles.push(candle);
         }
-        this.resetCurrentCandle(price, size, timestamp, date, minute);
-      } else {
-        if (price.gt(this.currentCandle.high)) {
-          this.currentCandle.high = price;
-        }
-        if (price.lt(this.currentCandle.low)) {
-          this.currentCandle.low = price;
-        }
-        this.currentCandle.close = price;
-        this.currentCandle.volume = this.currentCandle.volume.plus(size);
-        this.currentCandle.timestamp = timestamp;
       }
-    }
+    );
+
+    return candles;
   };
 
   // helpers
