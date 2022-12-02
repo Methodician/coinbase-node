@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, combineLatest, debounceTime, Observable } from 'rxjs';
+import { BehaviorSubject, combineLatest, Observable } from 'rxjs';
 import { CbFeedService, MergedTrade } from './cb-feed.service';
 import { CbRestService } from './cb-rest.service';
 import { Big } from 'big.js';
+import { BollingerBands, SMA } from 'trading-signals';
 
 @Injectable({
   providedIn: 'root',
@@ -18,12 +19,13 @@ export class CandleService {
   // todo: store in db (possibly in chunks or nested by day/hour/minute)
   // Could probably just grab candles from REST API instead of storing them
   // Then keep track of a relevant subset of candles in memory
-  candles: Candle[] = [];
-  currentCandle?: Candle;
-  wasTradeHistoryProcessed$ = new BehaviorSubject(false);
-  currentMinute$ = new BehaviorSubject(0);
   // rename me
-  syncedCandles: Candle[] = [];
+  recentClosingPricesDepth = 30;
+  recentClosingPrices: number[] = [];
+  smaDepth = 7;
+  sma = new SMA(this.smaDepth);
+  bbDepth = 20;
+  bb = new BollingerBands(this.bbDepth, 2);
 
   constructor(private feedSvc: CbFeedService, private restSvc: CbRestService) {}
 
@@ -41,7 +43,9 @@ export class CandleService {
     tradeStream$: Observable<MergedTrade>
   ) => {
     let wasContinuityChecked = false;
+    // Maybe doesn't need to be observable
     const wasTradeHistoryProcessed$ = new BehaviorSubject(false);
+
     const currentMinute$ = new BehaviorSubject(0);
     const currentCandle$ = new BehaviorSubject<Candle | undefined>(undefined);
 
@@ -117,7 +121,11 @@ export class CandleService {
       addTrade(trade);
     });
 
-    return { currentCandle$, currentMinute$, wasTradeHistoryProcessed$ };
+    return {
+      currentCandle$,
+      currentMinute$,
+      wasTradeHistoryProcessed$,
+    };
   };
 
   buildSyncedCandles = async (
@@ -146,17 +154,54 @@ export class CandleService {
       });
 
     const candles = await syncUp();
+    candles.forEach((candle) => {
+      this.addSma(candle);
+      this.addBb(candle);
+    });
+
     combineLatest([candleStream$, currentMinute$]).subscribe(
       ([candle, minute]) => {
         // Feels a little hacky and redundant but not sure maybe great
         // See comment in this.buildCandleStream
         if (minute !== candle.minute) {
+          this.addSma(candle);
+          this.addBb(candle);
           candles.push(candle);
         }
       }
     );
 
     return candles;
+  };
+
+  // Move to signal service? (already started)
+  addBb = (candle: Candle) => {
+    try {
+      this.bb.update(candle.close.toString());
+      if (this.recentClosingPrices.length >= this.bbDepth) {
+        const bol = this.bb.getResult();
+        candle.bb = {
+          upper: new Big(bol.upper.toFixed(2).toString()),
+          middle: new Big(bol.middle.toFixed(2).toString()),
+          lower: new Big(bol.lower.toFixed(2).toString()),
+        };
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  // Move to signal service?
+  addSma = (candle: Candle) => {
+    try {
+      this.sma.update(candle.close.toString());
+      if (this.recentClosingPrices.length >= this.smaDepth) {
+        const ma = this.sma.getResult();
+        candle.ma = new Big(ma.toFixed(2).toString());
+      }
+    } catch (error) {
+      console.log(error);
+    }
   };
 
   // helpers
@@ -175,8 +220,8 @@ export class CandleService {
   };
 }
 
-// Maybe a new CandleService could manage these things
-// Some of these number types could be Big numbers
+// Thinking I should leave the candle type alone and add a new type called "tick" or something
+// That could contain a candle as well as some signals
 export type Candle = {
   high: Big;
   low: Big;
@@ -186,4 +231,10 @@ export type Candle = {
   timestamp: number;
   date: Date;
   minute: number;
+  ma?: Big;
+  bb?: {
+    upper: Big;
+    middle: Big;
+    lower: Big;
+  };
 };

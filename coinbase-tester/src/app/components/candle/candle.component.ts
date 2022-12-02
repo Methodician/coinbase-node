@@ -1,8 +1,8 @@
 import { Component } from '@angular/core';
-import { BehaviorSubject, debounceTime } from 'rxjs';
+import { BehaviorSubject, debounceTime, Subject } from 'rxjs';
 import { Candle, CandleService } from 'src/app/services/candle.service';
 import { CbFeedService } from 'src/app/services/cb-feed.service';
-import { SignalService } from 'src/app/services/signal.service';
+import { PriceHistory, SignalService } from 'src/app/services/signal.service';
 
 @Component({
   selector: 'app-candle',
@@ -14,30 +14,68 @@ export class CandleComponent {
   syncedCandles: Candle[] = [];
   reversedCandles = () => [...this.syncedCandles].reverse();
   currentCandle$ = new BehaviorSubject<Candle | undefined>(undefined);
+  priceHistory: PriceHistory = {
+    length: 40,
+    prices: [],
+  };
+
+  // May want to use "faster" implementations for these guys since they are deeply cloned.
+  // Alternatively, maybe this process is a code smell
+  // Maybe these should not be made, or a different library should be used...
+  // Or maybe that's all premature optimization...
+  currentBb$ = new Subject<{
+    upper: number;
+    middle: number;
+    lower: number;
+  }>();
+  currentSma$ = new Subject<number>();
 
   // todo: organize the stuff into other services and components (and/or begin migration to node?)
 
   // feed stuff
 
   // sma stuff
-  sma = this.signalSvc.createSma(5);
 
   constructor(
     private feedSvc: CbFeedService,
     private candleSvc: CandleService,
     private signalSvc: SignalService
   ) {
-    // feed stuff
-    this.initializeCandles();
+    this.initializeCandles().then(() => {
+      this.watchCurrentCandle();
+    });
 
     // sma stuff
   }
 
+  watchCurrentCandle = () => {
+    this.currentCandle$.subscribe((candle) => {
+      if (candle) {
+        const history = this.signalSvc.addFastClosingPrice(
+          Number(candle.close.toString()),
+          this.priceHistory
+        );
+        // These repeat a lot at the start I think while history is processed...
+        // Could optimize later
+        const sma = this.signalSvc.createFastSmaResult(history);
+        if (sma) {
+          this.currentSma$.next(sma);
+        }
+        const bb = this.signalSvc.createFastBbResult(history);
+        if (bb) {
+          this.currentBb$.next(bb);
+        }
+      }
+    });
+  };
+
+  // This is turning into more than a candle initializer.
   initializeCandles = async () => {
     const { currentCandle$, currentMinute$, wasTradeHistoryProcessed$ } =
-      await this.buildStreams('ETH-USD');
+      await this.buildCandleStreams('ETH-USD');
 
     this.currentCandle$ = currentCandle$;
+
     wasTradeHistoryProcessed$.subscribe((wasProcessed) => {
       if (wasProcessed) {
         this.candleSvc
@@ -52,6 +90,7 @@ export class CandleComponent {
       }
     });
 
+    // Temporary until I am convinced we get the same results always
     currentMinute$.pipe(debounceTime(1000)).subscribe((minute) => {
       console.log('checking for discrepancies at minute', minute);
       this.getCandles().then(() => {
@@ -60,13 +99,17 @@ export class CandleComponent {
     });
   };
 
-  buildStreams = async (productId: string) => {
+  buildCandleStreams = async (productId: string) => {
     const { transferFeed } = await this.feedSvc.getLinearTrades(productId, 200);
     const { historicalTrades, tradeStream$ } = transferFeed();
     const { currentCandle$, currentMinute$, wasTradeHistoryProcessed$ } =
       this.candleSvc.buildCandleStream(historicalTrades, tradeStream$);
 
-    return { currentCandle$, currentMinute$, wasTradeHistoryProcessed$ };
+    return {
+      currentCandle$,
+      currentMinute$,
+      wasTradeHistoryProcessed$,
+    };
   };
 
   // likely going to drop this once I'm convinced (along with the REST candles)

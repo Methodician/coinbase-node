@@ -1,10 +1,14 @@
 <h1>Candle Component</h1>
 <div class="horizon">
   <div class="vert">
-    <h3>Streamed Candles</h3>
+    <h3>Streamed</h3>
     <div class="candles">
-      <h4>current$</h4>
+      <h4>candle$</h4>
       <pre>{{ currentCandle$ | async | json }}</pre>
+      <h4>sma$</h4>
+      <pre>{{ currentSma$ | async | json }}</pre>
+      <h4>bb$</h4>
+      <pre>{{ currentBb$ | async | json }}</pre>
     </div>
   </div>
   <div class="vert">
