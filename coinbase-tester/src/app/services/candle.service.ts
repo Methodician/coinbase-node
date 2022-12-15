@@ -3,7 +3,7 @@ import { BehaviorSubject, combineLatest, Observable } from 'rxjs';
 import { CbFeedService, MergedTrade } from './cb-feed.service';
 import { CbRestService } from './cb-rest.service';
 import { Big } from 'big.js';
-import { BollingerBands, SMA } from 'trading-signals';
+import { BandsResult } from 'trading-signals';
 
 @Injectable({
   providedIn: 'root',
@@ -12,20 +12,7 @@ export class CandleService {
   // I suspect a reliable strategy would be to always place buy and sell orders but distance and scale them based on the signals
   // My buys move closer and/or higher or further and/or lower and sells do the opposite based on signals
   // Although, there may be viable exceptions where the scale should move away from the price...
-
-  // NOTE: I think I need to delay the call to REST so I can ensure my current candle is always aligned with the last one from REST
-  // Possibly even do a check and restart the process if the last candle from REST is not the timing is off
-  // Should be able to derive other candle intervals from this
-  // todo: store in db (possibly in chunks or nested by day/hour/minute)
-  // Could probably just grab candles from REST API instead of storing them
-  // Then keep track of a relevant subset of candles in memory
-  // rename me
-  recentClosingPricesDepth = 30;
-  recentClosingPrices: number[] = [];
-  smaDepth = 7;
-  sma = new SMA(this.smaDepth);
-  bbDepth = 20;
-  bb = new BollingerBands(this.bbDepth, 2);
+  // todo: store things I can't get from REST in db (possibly in chunks or nested by day/hour/minute)
 
   constructor(private feedSvc: CbFeedService, private restSvc: CbRestService) {}
 
@@ -43,7 +30,7 @@ export class CandleService {
     tradeStream$: Observable<MergedTrade>
   ) => {
     let wasContinuityChecked = false;
-    // Maybe doesn't need to be observable
+    // Maybe doesn't need to be observable (see comment in CandleComponent.initializeCandles)
     const wasTradeHistoryProcessed$ = new BehaviorSubject(false);
 
     const currentMinute$ = new BehaviorSubject(0);
@@ -97,6 +84,7 @@ export class CandleService {
         }
       }
     };
+
     // attempt to reconcile history with stream
     tradeStream$.subscribe((trade) => {
       if (!wasContinuityChecked) {
@@ -131,10 +119,11 @@ export class CandleService {
   buildSyncedCandles = async (
     productId: string,
     candleStream$: BehaviorSubject<Candle>,
-    currentMinute$: BehaviorSubject<number>
+    currentMinute$: BehaviorSubject<number>,
+    maxCandles?: number
   ) => {
     const syncUp = () =>
-      new Promise<Candle[]>((resolve, reject) => {
+      new Promise<CandleHistory>((resolve, reject) => {
         const recurse = async () => {
           try {
             console.log('syncing up');
@@ -144,7 +133,7 @@ export class CandleService {
             if (poppedCandle?.minute !== currentMinute$.value) {
               setTimeout(recurse, 350);
             } else {
-              resolve(candles);
+              resolve(new CandleHistory(productId, maxCandles, candles));
             }
           } catch (error) {
             reject(error);
@@ -154,54 +143,18 @@ export class CandleService {
       });
 
     const candles = await syncUp();
-    candles.forEach((candle) => {
-      this.addSma(candle);
-      this.addBb(candle);
-    });
 
     combineLatest([candleStream$, currentMinute$]).subscribe(
       ([candle, minute]) => {
         // Feels a little hacky and redundant but not sure maybe great
         // See comment in this.buildCandleStream
         if (minute !== candle.minute) {
-          this.addSma(candle);
-          this.addBb(candle);
-          candles.push(candle);
+          candles.append(candle);
         }
       }
     );
 
     return candles;
-  };
-
-  // Move to signal service? (already started)
-  addBb = (candle: Candle) => {
-    try {
-      this.bb.update(candle.close.toString());
-      if (this.recentClosingPrices.length >= this.bbDepth) {
-        const bol = this.bb.getResult();
-        candle.bb = {
-          upper: new Big(bol.upper.toFixed(2).toString()),
-          middle: new Big(bol.middle.toFixed(2).toString()),
-          lower: new Big(bol.lower.toFixed(2).toString()),
-        };
-      }
-    } catch (error) {
-      console.log(error);
-    }
-  };
-
-  // Move to signal service?
-  addSma = (candle: Candle) => {
-    try {
-      this.sma.update(candle.close.toString());
-      if (this.recentClosingPrices.length >= this.smaDepth) {
-        const ma = this.sma.getResult();
-        candle.ma = new Big(ma.toFixed(2).toString());
-      }
-    } catch (error) {
-      console.log(error);
-    }
   };
 
   // helpers
@@ -231,10 +184,39 @@ export type Candle = {
   timestamp: number;
   date: Date;
   minute: number;
-  ma?: Big;
-  bb?: {
-    upper: Big;
-    middle: Big;
-    lower: Big;
-  };
+  sma?: Big;
+  bb?: BandsResult;
 };
+
+// This could take on more of the synced candle building logic internally
+export class CandleHistory {
+  currentCandle$ = new BehaviorSubject<Candle | null>(null);
+  maxCandles: number = 10000;
+  candles: Candle[] = [];
+  productId: string = 'UNSET';
+
+  constructor(
+    productId: string,
+    maxCandles?: number,
+    initialCandles?: Candle[]
+  ) {
+    this.productId = productId;
+    if (maxCandles) {
+      this.maxCandles = maxCandles;
+    }
+    if (initialCandles) {
+      this.candles = initialCandles;
+    }
+  }
+
+  append = (candle: Candle) => {
+    this.currentCandle$.next(candle);
+    this.candles.push(candle);
+    if (this.candles.length > this.maxCandles) {
+      this.candles.shift();
+    }
+  };
+
+  // Mainly here for display purposes
+  reversedCandles = () => this.candles.slice().reverse();
+}

@@ -6,15 +6,15 @@
       <h4>candle$</h4>
       <pre>{{ currentCandle$ | async | json }}</pre>
       <h4>sma$</h4>
-      <pre>{{ currentSma$ | async | json }}</pre>
+      <pre>{{ currentSma.sma$ | async | json }}</pre>
       <h4>bb$</h4>
-      <pre>{{ currentBb$ | async | json }}</pre>
+      <pre>{{ currentBb.bb$ | async | json }}</pre>
     </div>
   </div>
   <div class="vert">
-    <h3>Synced Candles</h3>
+    <h3>Historical Candles</h3>
     <div class="candles">
-      <pre *ngFor="let candle of reversedCandles()">
+      <pre *ngFor="let candle of candleHistory?.reversedCandles()">
                 {{ candle | json }}
             </pre
       >

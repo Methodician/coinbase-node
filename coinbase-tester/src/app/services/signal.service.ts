@@ -1,6 +1,14 @@
 import { Injectable } from '@angular/core';
-import Big from 'big.js';
-import { FasterBollingerBands, FasterSMA, SMA } from 'trading-signals';
+import Big, { BigSource } from 'big.js';
+import { Subject } from 'rxjs';
+import {
+  BandsResult,
+  BollingerBands,
+  FasterBandsResult,
+  FasterBollingerBands,
+  FasterSMA,
+  SMA,
+} from 'trading-signals';
 import { Candle } from './candle.service';
 
 @Injectable({
@@ -9,81 +17,256 @@ import { Candle } from './candle.service';
 export class SignalService {
   constructor() {}
 
-  /**
-   *
-   * @param price updates using "number" instead of "BigNumber"
-   * @param history length represents length of history
-   * @returns reference to the history object passed in
-   */
-  addFastClosingPrice = (price: number, history: PriceHistory) => {
-    const { prices, length } = history;
-    if (prices.length === length) {
-      prices.shift();
+  updateSmaAndAddToCandle = (sma: SmaGenerator, candle: Candle) => {
+    try {
+      const ma = sma.update(candle.close);
+      if (ma !== undefined) {
+        candle.sma = ma;
+      }
+    } catch (error) {
+      // May actually want to throw sometimes
+      console.error(error);
     }
-    prices.push(price);
-    return history;
   };
 
-  /**
-   * This generates a new SMA from the last few elements in
-   * a set of closing prices (interval determines number of elements)
-   * @param history price history on which to base the SMA
-   * @param interval optional interval to use for the SMA defaults to 7
-   * @returns SMA result as number
-   */
-  createFastSmaResult = (history: PriceHistory, interval = 7) => {
-    const { prices } = history;
-    if (prices.length < interval) {
-      return;
+  updateBbAndAddToCandle = (bb: BbGenerator, candle: Candle) => {
+    try {
+      const bol = bb.update(candle.close);
+      if (bol !== undefined) {
+        candle.bb = bol;
+      }
+    } catch (error) {
+      // May actually want to throw sometimes
+      console.error(error);
     }
-
-    const sma = new FasterSMA(interval);
-    for (let i = prices.length - 1 - interval; i < prices.length; i++) {
-      sma.update(prices[i]);
-    }
-
-    return sma.getResult();
-  };
-
-  /**
-   *
-   * @param history price history on which to base the BB
-   * @param interval optional interval fore the BB
-   * @param deviationMultiplier optional multiplier for the BB
-   * @returns BB results as object
-   */
-  createFastBbResult = (
-    history: PriceHistory,
-    interval = 20,
-    deviationMultiplier = 2
-  ) => {
-    const { prices } = history;
-    if (prices.length < interval) {
-      return;
-    }
-
-    const bb = new FasterBollingerBands(interval, deviationMultiplier);
-    for (let i = prices.length - 1 - interval; i < prices.length; i++) {
-      bb.update(prices[i]);
-    }
-
-    return bb.getResult();
-  };
-
-  createSma = (interval: number) => new SMA(interval);
-
-  addSmaToCandle = (sma: SMA, candle: Candle) => {
-    // in theory should be able to just use candle.close
-    // For some reason Big internal to trading-signals is not the same as Big.js
-    sma.update(candle.close.toString());
-    // trycatch to avoid erroring out with notEnoughData
-    const ma = sma.getResult();
-    // Like above, in theory the types of ma and candle.ma should be compatible
-    candle.ma = new Big(ma.toString());
   };
 }
 
-export type PriceHistory = {
-  length: number;
-  prices: number[];
-};
+// These can go in their own files
+export class PriceHistory {
+  maxHistory: number = 100;
+  prices: number[] = [];
+  currentPrice$ = new Subject<number>();
+  productId: string = 'UNSET';
+
+  constructor(productId: string, maxHistory?: number) {
+    this.productId = productId;
+    if (maxHistory) this.maxHistory = maxHistory;
+  }
+
+  append = (price: number) => {
+    this.prices.push(price);
+    this.currentPrice$.next(price);
+    if (this.prices.length > this.maxHistory) {
+      this.prices.shift();
+    }
+  };
+}
+
+export class SmaGenerator {
+  sma: SMA;
+  interval: number;
+  priceCount: number = 0;
+  sma$ = new Subject<Big>();
+  productId: string = 'UNSET';
+
+  constructor(interval: number, productId?: string) {
+    if (productId) this.productId = productId;
+
+    this.sma = new SMA(interval);
+    this.interval = interval;
+  }
+
+  update = (price: BigSource) => {
+    this.sma.update(price);
+
+    if (this.priceCount < this.interval) {
+      this.priceCount++;
+      return;
+    }
+
+    const res = this.sma.getResult();
+    this.sma$.next(res);
+    return res;
+  };
+
+  reCalculate = (priceHistory: BigSource[]) => {
+    this.sma = new SMA(this.interval);
+    this.priceCount = 0;
+    for (
+      let i = priceHistory.length - 1 - this.interval;
+      i < priceHistory.length;
+      i++
+    ) {
+      this.priceCount++;
+      this.sma.update(priceHistory[i]);
+    }
+
+    if (this.priceCount < this.interval) {
+      return;
+    }
+
+    const res = this.sma.getResult();
+    this.sma$.next(res);
+    return res;
+  };
+}
+
+// May combine fast into basic one
+export class FastSmaGenerator {
+  sma: FasterSMA;
+  interval: number;
+  priceCount: number = 0;
+  sma$ = new Subject<number>();
+  productId: string = 'UNSET';
+
+  constructor(interval: number, productId?: string) {
+    if (productId) this.productId = productId;
+
+    this.sma = new FasterSMA(interval);
+    this.interval = interval;
+  }
+
+  update = (price: number) => {
+    this.sma.update(price);
+
+    if (this.priceCount < this.interval) {
+      this.priceCount++;
+      return;
+    }
+
+    const res = this.sma.getResult();
+    this.sma$.next(res);
+    return res;
+  };
+
+  reCalculate = (priceHistory: number[]) => {
+    this.sma = new FasterSMA(this.interval);
+    this.priceCount = 0;
+    for (
+      let i = priceHistory.length - 1 - this.interval;
+      i < priceHistory.length;
+      i++
+    ) {
+      this.priceCount++;
+      this.sma.update(priceHistory[i]);
+    }
+
+    if (this.priceCount < this.interval) {
+      return;
+    }
+
+    const res = this.sma.getResult();
+    this.sma$.next(res);
+    return res;
+  };
+}
+
+export class BbGenerator {
+  bb: BollingerBands;
+  interval: number;
+  priceCount: number = 0;
+  deviationMultiplier?: number;
+  bb$ = new Subject<BandsResult>();
+  productId: string = 'UNSET';
+
+  constructor(
+    interval: number,
+    deviationMultiplier?: number,
+    productId?: string
+  ) {
+    if (productId) this.productId = productId;
+    if (deviationMultiplier) this.deviationMultiplier = deviationMultiplier;
+
+    this.bb = new BollingerBands(interval, deviationMultiplier);
+    this.interval = interval;
+  }
+
+  update = (price: BigSource) => {
+    this.bb.update(price);
+
+    if (this.priceCount < this.interval) {
+      this.priceCount++;
+      return;
+    }
+
+    const res = this.bb.getResult();
+    this.bb$.next(res);
+    return res;
+  };
+
+  reCalculate = (priceHistory: BigSource[]) => {
+    this.bb = new BollingerBands(this.interval, this.deviationMultiplier);
+    this.priceCount = 0;
+    for (
+      let i = priceHistory.length - 1 - this.interval;
+      i < priceHistory.length;
+      i++
+    ) {
+      this.priceCount++;
+      this.bb.update(priceHistory[i]);
+    }
+
+    if (this.priceCount < this.interval) {
+      return;
+    }
+
+    const res = this.bb.getResult();
+    this.bb$.next(res);
+    return res;
+  };
+}
+
+export class FastBbGenerator {
+  bb: FasterBollingerBands;
+  interval: number;
+  priceCount: number = 0;
+  deviationMultiplier?: number;
+  bb$ = new Subject<FasterBandsResult>();
+  productId: string = 'UNSET';
+
+  constructor(
+    interval: number,
+    deviationMultiplier?: number,
+    productId?: string
+  ) {
+    if (productId) this.productId = productId;
+    if (deviationMultiplier) this.deviationMultiplier = deviationMultiplier;
+
+    this.bb = new FasterBollingerBands(interval, deviationMultiplier);
+    this.interval = interval;
+  }
+
+  update = (price: number) => {
+    this.bb.update(price);
+
+    if (this.priceCount < this.interval) {
+      this.priceCount++;
+      return;
+    }
+
+    const res = this.bb.getResult();
+    this.bb$.next(res);
+    return res;
+  };
+
+  reCalculate = (priceHistory: number[]) => {
+    this.bb = new FasterBollingerBands(this.interval, this.deviationMultiplier);
+    this.priceCount = 0;
+    for (
+      let i = priceHistory.length - 1 - this.interval;
+      i < priceHistory.length;
+      i++
+    ) {
+      this.priceCount++;
+      this.bb.update(priceHistory[i]);
+    }
+
+    if (this.priceCount < this.interval) {
+      return;
+    }
+    const res = this.bb.getResult();
+    this.bb$.next(res);
+    return res;
+  };
+}
