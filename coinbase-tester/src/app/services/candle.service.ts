@@ -1,7 +1,6 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, combineLatest, Observable } from 'rxjs';
+import { BehaviorSubject, combineLatest, Observable, Subject } from 'rxjs';
 import { CbFeedService, MergedTrade } from './cb-feed.service';
-import { CbRestService } from './cb-rest.service';
 import { Big } from 'big.js';
 import { BandsResult } from 'trading-signals';
 
@@ -14,7 +13,8 @@ export class CandleService {
   // Although, there may be viable exceptions where the scale should move away from the price...
   // todo: store things I can't get from REST in db (possibly in chunks or nested by day/hour/minute)
 
-  constructor(private feedSvc: CbFeedService, private restSvc: CbRestService) {}
+  // May move feedSvc related stuff into aggregator too so we can avoid circular dependency
+  constructor(private feedSvc: CbFeedService) {}
 
   getRestCandles = async (productId: string) => {
     const res = await this.feedSvc.getCbCandles({
@@ -29,35 +29,24 @@ export class CandleService {
     historicalTrades: MergedTrade[],
     tradeStream$: Observable<MergedTrade>
   ) => {
-    let wasContinuityChecked = false;
-    // Maybe doesn't need to be observable (see comment in CandleComponent.initializeCandles)
-    const wasTradeHistoryProcessed$ = new BehaviorSubject(false);
+    return new Promise<{
+      currentMinute$: BehaviorSubject<number>;
+      currentCandle$: Subject<Candle>;
+    }>((resolve, reject) => {
+      console.log('building stream');
 
-    const currentMinute$ = new BehaviorSubject(0);
-    const currentCandle$ = new BehaviorSubject<Candle | undefined>(undefined);
+      let currentCandle: Candle;
 
-    const addTrade = (trade: MergedTrade) => {
-      const { price, size, date } = trade;
-      const minute = date.getMinutes();
-      const timestamp = date.getTime();
+      const currentMinute$ = new BehaviorSubject(0);
+      const currentCandle$ = new Subject<Candle>();
 
-      if (!currentCandle$.value) {
-        currentCandle$.next({
-          high: price,
-          low: price,
-          open: price,
-          close: price,
-          volume: size,
-          date,
-          timestamp,
-          minute,
-        });
-      } else {
-        if (currentCandle$.value.minute !== minute) {
-          // minute gets iterated before candle
-          // This lets buildSyncedCandles know to push the candle before it ticks over
-          currentMinute$.next(minute);
-          currentCandle$.next({
+      const addTrade = (trade: MergedTrade) => {
+        const { price, size, date } = trade;
+        const minute = date.getMinutes();
+        const timestamp = date.getTime();
+
+        if (!currentCandle) {
+          currentCandle = {
             high: price,
             low: price,
             open: price,
@@ -66,59 +55,69 @@ export class CandleService {
             date,
             timestamp,
             minute,
-          });
+          };
+          currentCandle$.next(currentCandle);
+          currentMinute$.next(minute);
         } else {
-          const currentCandle = currentCandle$.value;
-          const { high, low, open, volume } = currentCandle;
+          if (currentCandle.minute !== minute) {
+            // minute gets iterated before candle
+            // This lets buildSyncedCandles know to push the candle before it ticks over
+            currentMinute$.next(minute);
+            currentCandle = {
+              high: price,
+              low: price,
+              open: price,
+              close: price,
+              volume: size,
+              date,
+              timestamp,
+              minute,
+            };
+            currentCandle$.next(currentCandle);
+          } else {
+            const { high, low, open, volume } = currentCandle;
 
-          currentCandle$.next({
-            high: price.gt(high) ? price : high,
-            low: price.lt(low) ? price : low,
-            open,
-            close: price,
-            volume: volume.plus(size),
-            date,
-            timestamp,
-            minute,
-          });
+            currentCandle = {
+              high: price.gt(high) ? price : high,
+              low: price.lt(low) ? price : low,
+              open,
+              close: price,
+              volume: volume.plus(size),
+              date,
+              timestamp,
+              minute,
+            };
+            currentCandle$.next(currentCandle);
+          }
         }
-      }
-    };
+      };
 
-    // attempt to reconcile history with stream
-    tradeStream$.subscribe((trade) => {
-      if (!wasContinuityChecked) {
-        // ensure the final trade from history is just before the first trade in stream
-        // Maybe not the best place for this check, but for now...
-        const lastHistoricalId =
-          historicalTrades[historicalTrades.length - 1].tradeId;
-        const firstStreamId = trade.tradeId;
-        if (lastHistoricalId !== firstStreamId - 1) {
-          alert('Trade ID continuity was broken');
-        }
-        wasContinuityChecked = true;
-      }
-      if (!wasTradeHistoryProcessed$.value) {
-        // process historical trades before stream
-        for (let trade of historicalTrades) {
-          addTrade(trade);
-        }
-        wasTradeHistoryProcessed$.next(true);
-        wasTradeHistoryProcessed$.complete();
-      }
-      addTrade(trade);
+      // Check for continuity and process history, then resolve
+      this.feedSvc
+        .checkTradeStreamContinuity(historicalTrades, tradeStream$)
+        .then((isContinuous) => {
+          if (!isContinuous) {
+            // alert and abort for now, but abort and retry if this becomes an issue
+            alert('Trade stream not continuous. Aborting.');
+            reject('Trade stream not continuous');
+          } else {
+            console.log('trade stream is continuous. Processing history');
+            for (let trade of historicalTrades) {
+              addTrade(trade);
+            }
+            resolve({ currentCandle$, currentMinute$ });
+          }
+        });
+
+      tradeStream$.subscribe((trade) => {
+        addTrade(trade);
+      });
     });
-
-    return {
-      currentCandle$,
-      currentMinute$,
-      wasTradeHistoryProcessed$,
-    };
   };
 
   buildSyncedCandles = async (
     productId: string,
-    candleStream$: BehaviorSubject<Candle>,
+    candleStream$: Subject<Candle>,
     currentMinute$: BehaviorSubject<number>,
     maxCandles?: number
   ) => {
@@ -190,10 +189,10 @@ export type Candle = {
 
 // This could take on more of the synced candle building logic internally
 export class CandleHistory {
-  currentCandle$ = new BehaviorSubject<Candle | null>(null);
+  lastCandle$ = new Subject<Candle>();
   maxCandles: number = 10000;
   candles: Candle[] = [];
-  productId: string = 'UNSET';
+  productId: string;
 
   constructor(
     productId: string,
@@ -210,7 +209,7 @@ export class CandleHistory {
   }
 
   append = (candle: Candle) => {
-    this.currentCandle$.next(candle);
+    this.lastCandle$.next(candle);
     this.candles.push(candle);
     if (this.candles.length > this.maxCandles) {
       this.candles.shift();

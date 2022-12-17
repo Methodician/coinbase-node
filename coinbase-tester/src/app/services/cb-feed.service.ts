@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { filter, firstValueFrom, from, map, timer } from 'rxjs';
+import { filter, first, firstValueFrom, map, Observable, timer } from 'rxjs';
 
 import {
   CbRestService,
@@ -7,7 +7,6 @@ import {
   GetProductTradesArgs,
   RestResponseTrade,
 } from './cb-rest.service';
-import { BollingerBands, NotEnoughDataError, SMA } from 'trading-signals';
 import { CbSocketService, MatchMessage } from './cb-socket.service';
 import Big from 'big.js';
 import { Candle } from './candle.service';
@@ -98,19 +97,16 @@ export class CbFeedService {
     await checkUntilMatch();
 
     // Here we create a continuous history and attempt to transfer the socket watch immediately
-    const transferFeed = () => {
-      const historicalTradesMap: Record<number, MergedTrade> = {};
-      for (let trade of restTrades) {
-        historicalTradesMap[trade.tradeId] = trade;
-      }
-      for (let trade of socketTrades) {
-        historicalTradesMap[trade.tradeId] = trade;
-      }
-      const historicalTrades = Object.values(historicalTradesMap);
+    const transferFeed = async () => {
+      const historicalTrades = this.eliminateDuplicateTrades(
+        restTrades,
+        socketTrades
+      );
+
       socketSubscription.unsubscribe();
       // I believe this could still lead to a very  tight race condition
       // but if we can miss a single trade without ruining the analysis maybe that is okay...
-      // But, what if that trade is worth fa million dollars? I will just alert in the component for now
+      // But, what if that trade is worth a million dollars? I will just alert in the component for now
       return {
         historicalTrades,
         tradeStream$,
@@ -124,6 +120,45 @@ export class CbFeedService {
   };
 
   // === HELPERS ===
+  checkTradeStreamContinuity = (
+    historicalTrades: MergedTrade[],
+    tradeStream$: Observable<MergedTrade>
+  ) =>
+    new Promise<boolean>((resolve, reject) => {
+      console.log('checking continuity');
+      try {
+        tradeStream$.pipe(first()).subscribe((trade) => {
+          console.log('first trade in stream', trade);
+          const lastHistoricalId =
+            historicalTrades[historicalTrades.length - 1].tradeId;
+          const firstStreamId = trade.tradeId;
+          if (lastHistoricalId === firstStreamId - 1) {
+            console.log('trade stream continuous');
+            resolve(true);
+          } else {
+            console.log(
+              `Trade stream not continuous. Last historical trade: ${lastHistoricalId}. First trade in stream: ${firstStreamId}`
+            );
+            resolve(false);
+          }
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+  eliminateDuplicateTrades = (
+    trades1: MergedTrade[],
+    trades2: MergedTrade[]
+  ) => {
+    const tradesMap = [...trades1, ...trades2].reduce((acc, trade) => {
+      if (!acc[trade.tradeId]) {
+        acc[trade.tradeId] = trade;
+      }
+      return acc;
+    }, {} as Record<number, MergedTrade>);
+    return Object.values(tradesMap);
+  };
 
   processCandle = (
     candle: [number, number, number, number, number, number]

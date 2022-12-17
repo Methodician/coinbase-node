@@ -49,9 +49,13 @@ export class PriceHistory {
   currentPrice$ = new Subject<number>();
   productId: string = 'UNSET';
 
-  constructor(productId: string, maxHistory?: number) {
+  constructor(productId: string, maxHistory?: number, prevHistory?: number[]) {
     this.productId = productId;
     if (maxHistory) this.maxHistory = maxHistory;
+    if (prevHistory) {
+      this.prices = prevHistory.slice(-this.maxHistory);
+      this.currentPrice$.next(prevHistory[prevHistory.length - 1]);
+    }
   }
 
   append = (price: number) => {

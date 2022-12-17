@@ -2,19 +2,19 @@
 <div class="horizon">
   <div class="vert">
     <h3>Streamed</h3>
-    <div class="candles">
+    <div class="candles" *ngIf="signalStream as signals">
       <h4>candle$</h4>
-      <pre>{{ currentCandle$ | async | json }}</pre>
+      <pre>{{ signals.candle$ | async | json }}</pre>
       <h4>sma$</h4>
-      <pre>{{ currentSma.sma$ | async | json }}</pre>
+      <pre>{{ signals.sma$ | async | json }}</pre>
       <h4>bb$</h4>
-      <pre>{{ currentBb.bb$ | async | json }}</pre>
+      <pre>{{ signals.bb$ | async | json }}</pre>
     </div>
   </div>
   <div class="vert">
     <h3>Historical Candles</h3>
-    <div class="candles">
-      <pre *ngFor="let candle of candleHistory?.reversedCandles()">
+    <div class="candles" *ngIf="candleHistory as history">
+      <pre *ngFor="let candle of history.reversedCandles()">
                 {{ candle | json }}
             </pre
       >
