@@ -16,15 +16,6 @@ export class CandleService {
   // May move feedSvc related stuff into aggregator too so we can avoid circular dependency
   constructor(private feedSvc: CbFeedService) {}
 
-  getRestCandles = async (productId: string) => {
-    const res = await this.feedSvc.getCbCandles({
-      productId,
-      granularity: 60,
-    });
-
-    return res;
-  };
-
   buildCandleStream = (
     historicalTrades: MergedTrade[],
     tradeStream$: Observable<MergedTrade>
@@ -123,37 +114,42 @@ export class CandleService {
   ) => {
     const syncUp = () =>
       new Promise<CandleHistory>((resolve, reject) => {
-        const recurse = async () => {
+        const tryIt = async () => {
           try {
-            console.log('syncing up');
-            const candles = await this.getRestCandles(productId);
+            console.log('trying to sync up');
+            const candles = await this.feedSvc.getCbCandles({
+              productId,
+              granularity: 60, // may not hard-code this
+            });
             candles.reverse();
-            const poppedCandle = candles.pop();
-            if (poppedCandle?.minute !== currentMinute$.value) {
-              setTimeout(recurse, 350);
+            const lastCandle = candles.pop();
+            if (lastCandle?.minute !== currentMinute$.value) {
+              console.log('not synced up yet');
+              setTimeout(tryIt, 350); // may not hard-code this delay either
             } else {
+              console.log('synced up');
               resolve(new CandleHistory(productId, maxCandles, candles));
             }
           } catch (error) {
             reject(error);
           }
         };
-        recurse();
+        tryIt();
       });
 
-    const candles = await syncUp();
+    const candleHistory = await syncUp();
 
     combineLatest([candleStream$, currentMinute$]).subscribe(
       ([candle, minute]) => {
-        // Feels a little hacky and redundant but not sure maybe great
-        // See comment in this.buildCandleStream
+        // In theory, candle.minute ticks over before minute does
+        // Maybe a little hacky, but it works
         if (minute !== candle.minute) {
-          candles.append(candle);
+          candleHistory.append(candle);
         }
       }
     );
 
-    return candles;
+    return candleHistory;
   };
 
   // helpers

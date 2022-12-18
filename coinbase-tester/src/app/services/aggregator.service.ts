@@ -16,6 +16,8 @@ import {
   providedIn: 'root',
 })
 export class AggregatorService {
+  // One of the key reasons for this service is to avoid circular dependencies
+
   constructor(
     private feedSvc: CbFeedService,
     private candleSvc: CandleService,

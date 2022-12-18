@@ -4,6 +4,7 @@ import {
   SignalStream,
 } from 'src/app/services/aggregator.service';
 import { CandleHistory, CandleService } from 'src/app/services/candle.service';
+import { CbFeedService } from 'src/app/services/cb-feed.service';
 
 @Component({
   selector: 'app-candle',
@@ -18,6 +19,7 @@ export class CandleComponent {
 
   constructor(
     private aggSvc: AggregatorService,
+    private cbFeedSvc: CbFeedService,
     private candleSvc: CandleService
   ) {
     this.aggSvc
@@ -35,16 +37,19 @@ export class CandleComponent {
     // I'm seeing a new pattern where the first minute processed is discrepant from the server
     // So far rarely if ever seeing further discrepancies, although it doesn't match the CB advanced trade UI
     console.log('Watching for discrepancies with server...');
-    const { candleHistory: history } = this;
-    if (history === undefined) {
+    const { candleHistory } = this;
+    if (candleHistory === undefined) {
       throw new Error('No candle history');
     }
 
-    history.lastCandle$.subscribe(async () => {
-      const restCandles = await this.candleSvc.getRestCandles(
-        history.productId
-      );
-      const syncedCandles = history.reversedCandles() || [];
+    const { lastCandle$, productId, reversedCandles } = candleHistory;
+
+    lastCandle$.subscribe(async () => {
+      const restCandles = await this.cbFeedSvc.getCbCandles({
+        productId,
+        granularity: 60,
+      });
+      const syncedCandles = reversedCandles() || [];
 
       for (let [i, v] of restCandles.entries()) {
         const r = v;
