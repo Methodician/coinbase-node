@@ -1,8 +1,8 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, combineLatest, Observable, Subject } from 'rxjs';
-import { CbFeedService, MergedTrade } from './cb-feed.service';
-import { Big } from 'big.js';
-import { BandsResult } from 'trading-signals';
+import { Candle, MergedTrade } from '../models';
+import { CandleHistory } from '../rename-me';
+import { CbFeedService } from './cb-feed.service';
 
 @Injectable({
   providedIn: 'root',
@@ -151,67 +151,4 @@ export class CandleService {
 
     return candleHistory;
   };
-
-  // helpers
-  logCandle = (candle: Candle) => {
-    const loggable = {
-      high: candle?.high.toString(),
-      low: candle?.low.toString(),
-      open: candle?.open.toString(),
-      close: candle?.close.toString(),
-      volume: candle?.volume.toString(),
-      date: candle?.date,
-      timestamp: candle?.timestamp,
-      minute: candle?.minute,
-    };
-    console.log(loggable);
-  };
-}
-
-// Thinking I should leave the candle type alone and add a new type called "tick" or something
-// That could contain a candle as well as some signals
-export type Candle = {
-  high: Big;
-  low: Big;
-  open: Big;
-  close: Big;
-  volume: Big;
-  timestamp: number;
-  date: Date;
-  minute: number;
-  sma?: Big;
-  bb?: BandsResult;
-};
-
-// This could take on more of the synced candle building logic internally
-export class CandleHistory {
-  lastCandle$ = new Subject<Candle>();
-  maxCandles: number = 10000;
-  candles: Candle[] = [];
-  productId: string;
-
-  constructor(
-    productId: string,
-    maxCandles?: number,
-    initialCandles?: Candle[]
-  ) {
-    this.productId = productId;
-    if (maxCandles) {
-      this.maxCandles = maxCandles;
-    }
-    if (initialCandles) {
-      this.candles = initialCandles;
-    }
-  }
-
-  append = (candle: Candle) => {
-    this.lastCandle$.next(candle);
-    this.candles.push(candle);
-    if (this.candles.length > this.maxCandles) {
-      this.candles.shift();
-    }
-  };
-
-  // Mainly here for display purposes
-  reversedCandles = () => this.candles.slice().reverse();
 }

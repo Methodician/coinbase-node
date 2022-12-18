@@ -1,9 +1,8 @@
 import { Component } from '@angular/core';
-import {
-  AggregatorService,
-  SignalStream,
-} from 'src/app/services/aggregator.service';
-import { CandleHistory, CandleService } from 'src/app/services/candle.service';
+import { CandleHistory, SignalStream } from 'src/app/rename-me';
+import { logCandle } from 'src/app/rename-me/helpers';
+import { AggregatorService } from 'src/app/services/aggregator.service';
+import { CandleService } from 'src/app/services/candle.service';
 import { CbFeedService } from 'src/app/services/cb-feed.service';
 
 @Component({
@@ -56,8 +55,8 @@ export class CandleComponent {
         const s = syncedCandles[i];
         if (r?.minute !== s?.minute) {
           console.log('r.minute !== s.minute');
-          this.candleSvc.logCandle(r);
-          this.candleSvc.logCandle(s);
+          logCandle(r);
+          logCandle(s);
           // Comparison not valid so don't waste processing
           return;
         }
@@ -82,9 +81,9 @@ export class CandleComponent {
           console.log('discrepantElements', discrepantElements);
           console.log('minute', r.minute);
           console.log('cb server:');
-          this.candleSvc.logCandle(r);
+          logCandle(r);
           console.log('internal:');
-          this.candleSvc.logCandle(s);
+          logCandle(s);
         }
       }
     });

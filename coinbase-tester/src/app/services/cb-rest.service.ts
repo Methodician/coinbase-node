@@ -1,9 +1,6 @@
 import { Injectable } from '@angular/core';
 import axios from 'axios';
 import { BehaviorSubject } from 'rxjs';
-import { Candle } from './candle.service';
-import { MergedTrade } from './cb-feed.service';
-import { MatchMessage } from './cb-socket.service';
 const EXCHANGE_URL = 'https://api.exchange.coinbase.com';
 
 @Injectable({

@@ -9,7 +9,7 @@ import {
 } from './cb-rest.service';
 import { CbSocketService, MatchMessage } from './cb-socket.service';
 import Big from 'big.js';
-import { Candle } from './candle.service';
+import { Candle, MergedTrade } from '../models';
 
 @Injectable({
   providedIn: 'root',
@@ -203,13 +203,3 @@ export class CbFeedService {
     productId: productId,
   });
 }
-
-// Models (should go elsewhere one day)
-export type MergedTrade = {
-  price: Big;
-  size: Big;
-  date: Date;
-  side: 'buy' | 'sell';
-  tradeId: number;
-  productId: string;
-};

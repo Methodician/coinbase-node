@@ -1,6 +1,5 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, filter, first, map, Observable, Subject } from 'rxjs';
-import { MergedTrade } from './cb-feed.service';
+import { BehaviorSubject, filter, first, Subject } from 'rxjs';
 const FEED_URL = 'wss://ws-feed.exchange.coinbase.com';
 
 @Injectable({

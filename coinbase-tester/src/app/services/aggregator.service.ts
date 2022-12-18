@@ -1,16 +1,15 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Subject } from 'rxjs';
-import { FasterBandsResult } from 'trading-signals';
-import { Candle, CandleHistory, CandleService } from './candle.service';
-import { CbFeedService } from './cb-feed.service';
+
 import {
   BbGenerator,
-  FastBbGenerator,
-  FastSmaGenerator,
+  CandleHistory,
   PriceHistory,
-  SignalService,
+  SignalStream,
   SmaGenerator,
-} from './signal.service';
+} from '../rename-me';
+import { CandleService } from './candle.service';
+import { CbFeedService } from './cb-feed.service';
+import { SignalService } from './signal.service';
 
 @Injectable({
   providedIn: 'root',
@@ -48,7 +47,7 @@ export class AggregatorService {
     const prices: PriceHistory = new PriceHistory(productId);
 
     const smaGenerator = new SmaGenerator(7, productId);
-    const bbGenerator = new BbGenerator(20, 2, productId);
+    const bbGenerator = new BbGenerator(productId, 20, 2);
 
     const candleHistory = await this.candleSvc.buildSyncedCandles(
       productId,
@@ -85,46 +84,4 @@ export class AggregatorService {
       prices,
     };
   };
-}
-
-export class SignalStream {
-  candle$: Subject<Candle>;
-  minute$: Subject<number>;
-  sma$ = new Subject<number>();
-  bb$ = new Subject<FasterBandsResult>();
-  price$ = new Subject<number>();
-  private ph: PriceHistory;
-  private bbGenerator: FastBbGenerator;
-  private smaGenerator: FastSmaGenerator;
-
-  constructor(
-    productId: string,
-    candle$: Subject<Candle>,
-    minute$: Subject<number>,
-    prices: PriceHistory,
-    smaInterval: number = 7,
-    bbInterval: number = 20,
-    bbDeviation: number = 2
-  ) {
-    this.candle$ = candle$;
-    this.minute$ = minute$;
-    this.ph = prices;
-
-    this.smaGenerator = new FastSmaGenerator(smaInterval, productId);
-    this.bbGenerator = new FastBbGenerator(bbInterval, bbDeviation, productId);
-
-    this.smaGenerator.sma$.subscribe((sma) => {
-      this.sma$.next(sma);
-    });
-    this.bbGenerator.bb$.subscribe((bb) => {
-      this.bb$.next(bb);
-    });
-
-    this.candle$.subscribe((candle) => {
-      const recentPrices = this.ph.prices.slice(-bbInterval);
-      recentPrices.push(Number(candle.close.toString()));
-      this.smaGenerator.reCalculate(recentPrices);
-      this.bbGenerator.reCalculate(recentPrices);
-    });
-  }
 }
