@@ -38,9 +38,9 @@ export class CandleService {
 
         if (!currentCandle) {
           currentCandle = {
+            open: price,
             high: price,
             low: price,
-            open: price,
             close: price,
             volume: size,
             date,
@@ -55,9 +55,9 @@ export class CandleService {
             // This lets buildSyncedCandles know to push the candle before it ticks over
             currentMinute$.next(minute);
             currentCandle = {
+              open: price,
               high: price,
               low: price,
-              open: price,
               close: price,
               volume: size,
               date,
@@ -69,9 +69,9 @@ export class CandleService {
             const { high, low, open, volume } = currentCandle;
 
             currentCandle = {
+              open,
               high: price.gt(high) ? price : high,
               low: price.lt(low) ? price : low,
-              open,
               close: price,
               volume: volume.plus(size),
               date,

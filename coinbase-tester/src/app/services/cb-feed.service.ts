@@ -164,18 +164,18 @@ export class CbFeedService {
     candle: [number, number, number, number, number, number]
   ): Candle => {
     const [time, cbLow, cbHigh, cbOpen, cbClose, cbVolume] = candle;
+    const open = Big(cbOpen);
     const high = Big(cbHigh);
     const low = Big(cbLow);
-    const open = Big(cbOpen);
     const close = Big(cbClose);
     const volume = Big(cbVolume);
     const date = new Date(time * 1000);
     const timestamp = date.getTime();
     const minute = date.getMinutes();
     return {
+      open,
       high,
       low,
-      open,
       close,
       volume,
       date,
